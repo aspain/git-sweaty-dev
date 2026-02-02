@@ -1,0 +1,3293 @@
+const DEFAULT_COLORS = ["#1f2937", "#1f2937", "#1f2937", "#1f2937", "#1f2937"];
+const MULTI_TYPE_COLOR = "#b967ff";
+const TYPE_ACCENT_OVERRIDES = {
+  Workout: "#ff8a5b",
+};
+const FALLBACK_VAPORWAVE = ["#f15bb5", "#fee440", "#00bbf9", "#00f5d4", "#9b5de5", "#fb5607", "#ffbe0b", "#72efdd"];
+const STAT_PLACEHOLDER = "- - -";
+const TYPE_LABEL_OVERRIDES = {
+  HighIntensityIntervalTraining: "HITT",
+  Workout: "Other Workout",
+};
+let TYPE_META = {};
+let OTHER_BUCKET = "OtherSports";
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MS_PER_DAY = 1000 * 60 * 60 * 24;
+
+const typeButtons = document.getElementById("typeButtons");
+const yearButtons = document.getElementById("yearButtons");
+const typeMenu = document.getElementById("typeMenu");
+const yearMenu = document.getElementById("yearMenu");
+const typeMenuButton = document.getElementById("typeMenuButton");
+const yearMenuButton = document.getElementById("yearMenuButton");
+const typeMenuLabel = document.getElementById("typeMenuLabel");
+const yearMenuLabel = document.getElementById("yearMenuLabel");
+const typeClearButton = document.getElementById("typeClearButton");
+const yearClearButton = document.getElementById("yearClearButton");
+const resetAllButton = document.getElementById("resetAllButton");
+const typeMenuOptions = document.getElementById("typeMenuOptions");
+const yearMenuOptions = document.getElementById("yearMenuOptions");
+const heatmaps = document.getElementById("heatmaps");
+const tooltip = document.getElementById("tooltip");
+const summary = document.getElementById("summary");
+const updated = document.getElementById("updated");
+const repoLink = document.querySelector(".repo-link");
+const isTouch = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+const BREAKPOINTS = Object.freeze({
+  NARROW_LAYOUT_MAX: 900,
+});
+let pendingAlignmentFrame = null;
+
+function isNarrowLayoutViewport() {
+  return window.matchMedia(`(max-width: ${BREAKPOINTS.NARROW_LAYOUT_MAX}px)`).matches;
+}
+
+function isDesktopLikeViewport() {
+  return !isNarrowLayoutViewport();
+}
+
+function requestLayoutAlignment() {
+  if (pendingAlignmentFrame !== null) {
+    window.cancelAnimationFrame(pendingAlignmentFrame);
+  }
+  pendingAlignmentFrame = window.requestAnimationFrame(() => {
+    pendingAlignmentFrame = null;
+    alignStackedStatsToYAxisLabels();
+  });
+}
+
+function schedulePostInteractionAlignment() {
+  if (isTouch) return;
+  requestLayoutAlignment();
+}
+
+function captureCardScrollOffsets(container) {
+  const offsets = new Map();
+  if (!container) return offsets;
+  container.querySelectorAll(".card[data-scroll-key]").forEach((card) => {
+    const key = String(card.dataset.scrollKey || "");
+    if (!key) return;
+    const scrollLeft = Number(card.scrollLeft || 0);
+    if (Number.isFinite(scrollLeft) && scrollLeft > 0) {
+      offsets.set(key, scrollLeft);
+    }
+  });
+  return offsets;
+}
+
+function restoreCardScrollOffsets(container, offsets) {
+  if (!container || !(offsets instanceof Map) || !offsets.size) return;
+  container.querySelectorAll(".card[data-scroll-key]").forEach((card) => {
+    const key = String(card.dataset.scrollKey || "");
+    if (!key || !offsets.has(key)) return;
+    const target = Number(offsets.get(key));
+    if (!Number.isFinite(target) || target <= 0) return;
+    const maxScroll = Math.max(0, card.scrollWidth - card.clientWidth);
+    card.scrollLeft = Math.min(target, maxScroll);
+  });
+}
+
+function inferGitHubRepoFromLocation(loc) {
+  const host = String(loc.hostname || "").toLowerCase();
+  const pathParts = String(loc.pathname || "")
+    .split("/")
+    .filter(Boolean);
+
+  if (host.endsWith(".github.io")) {
+    const owner = host.replace(/\.github\.io$/, "");
+    if (!owner) return null;
+    const repo = pathParts[0] || `${owner}.github.io`;
+    return { owner, repo };
+  }
+
+  if (host === "github.com" && pathParts.length >= 2) {
+    return { owner: pathParts[0], repo: pathParts[1] };
+  }
+
+  return null;
+}
+
+function syncRepoLink() {
+  if (!repoLink) return;
+  const inferred = inferGitHubRepoFromLocation(window.location);
+  if (!inferred) return;
+  const href = `https://github.com/${inferred.owner}/${inferred.repo}`;
+  repoLink.href = href;
+  repoLink.textContent = `${inferred.owner}/${inferred.repo}`;
+}
+
+function readCssVar(name, fallback, scope) {
+  const target = scope || document.body || document.documentElement;
+  const value = getComputedStyle(target).getPropertyValue(name).trim();
+  const parsed = parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function getLayout(scope) {
+  return {
+    cell: readCssVar("--cell", 12, scope),
+    gap: readCssVar("--gap", 2, scope),
+    gridPadTop: readCssVar("--grid-pad-top", 6, scope),
+    gridPadLeft: readCssVar("--grid-pad-left", 6, scope),
+    gridPadRight: readCssVar("--grid-pad-right", 4, scope),
+    gridPadBottom: readCssVar("--grid-pad-bottom", 6, scope),
+  };
+}
+
+function getElementBoxWidth(element) {
+  if (!element) return 0;
+  const width = element.getBoundingClientRect().width;
+  return Number.isFinite(width) ? width : 0;
+}
+
+function getElementContentWidth(element) {
+  if (!element) return 0;
+  const styles = getComputedStyle(element);
+  const paddingLeft = parseFloat(styles.paddingLeft) || 0;
+  const paddingRight = parseFloat(styles.paddingRight) || 0;
+  return Math.max(0, element.clientWidth - paddingLeft - paddingRight);
+}
+
+function alignFrequencyMetricChipsToSecondGraphAxis(frequencyCard, title, metricChipRow) {
+  metricChipRow.style.removeProperty("margin-left");
+  const secondGraphYearLabel = frequencyCard.querySelector(
+    ".more-stats-grid > .more-stats-col[data-chip-axis-anchor=\"true\"] .axis-day-col .axis-y-label",
+  );
+  if (!secondGraphYearLabel) return;
+
+  const titleRect = title.getBoundingClientRect();
+  const chipRect = metricChipRow.getBoundingClientRect();
+  const yearLabelRect = secondGraphYearLabel.getBoundingClientRect();
+  const currentLeft = chipRect.left - titleRect.left;
+  const targetLeft = yearLabelRect.left - titleRect.left;
+
+  if (!Number.isFinite(currentLeft) || !Number.isFinite(targetLeft)) return;
+  const extraOffset = targetLeft - currentLeft;
+  if (extraOffset > 0.5) {
+    metricChipRow.style.setProperty("margin-left", `${extraOffset}px`);
+  }
+}
+
+function resetCardLayoutState() {
+  if (!heatmaps) return;
+  heatmaps.querySelectorAll(".more-stats").forEach((card) => {
+    card.classList.remove("more-stats-stacked");
+    card.style.removeProperty("--card-graph-rail-width");
+    card.style.removeProperty("--frequency-graph-gap");
+    card.style.removeProperty("--frequency-grid-pad-right");
+    const metricChipRow = card.querySelector(".more-stats-metric-chips");
+    const facts = card.querySelector(".more-stats-facts.side-stats-column");
+    if (metricChipRow && facts && facts.firstElementChild !== metricChipRow) {
+      metricChipRow.style.removeProperty("margin-left");
+      facts.insertBefore(metricChipRow, facts.firstChild);
+    }
+  });
+  heatmaps.querySelectorAll(".year-card").forEach((card) => {
+    card.classList.remove("year-card-stacked");
+    card.style.removeProperty("--card-graph-rail-width");
+  });
+}
+
+function normalizeSideStatCardSize() {
+  if (!heatmaps) return;
+  const cards = Array.from(
+    heatmaps.querySelectorAll(
+      ".year-card .card-stats.side-stats-column .card-stat, .more-stats .more-stats-fact-card",
+    ),
+  );
+  cards.forEach((card) => {
+    card.style.removeProperty("width");
+    card.style.removeProperty("maxWidth");
+    card.style.removeProperty("minHeight");
+  });
+  if (!cards.length) {
+    heatmaps.style.removeProperty("--side-stat-card-width");
+    heatmaps.style.removeProperty("--side-stat-card-min-height");
+    return;
+  }
+
+  const maxWidth = cards.reduce((acc, card) => Math.max(acc, Math.ceil(getElementBoxWidth(card))), 0);
+  const maxHeight = cards.reduce((acc, card) => Math.max(acc, Math.ceil(card.getBoundingClientRect().height || 0)), 0);
+
+  if (maxWidth > 0) {
+    heatmaps.style.setProperty("--side-stat-card-width", `${maxWidth}px`);
+  }
+  if (maxHeight > 0) {
+    heatmaps.style.setProperty("--side-stat-card-min-height", `${maxHeight}px`);
+  }
+}
+
+function buildSectionLayoutPlan(list) {
+  const frequencyCard = list.querySelector(".labeled-card-row-frequency .more-stats");
+  const yearCards = Array.from(list.querySelectorAll(".labeled-card-row-year .year-card"));
+  if (!frequencyCard && !yearCards.length) return null;
+
+  const yearGraphWidths = yearCards
+    .map((card) => getElementBoxWidth(card.querySelector(".heatmap-area")))
+    .filter((width) => width > 0);
+
+  let graphRailWidth = yearGraphWidths.length ? Math.max(...yearGraphWidths) : 0;
+  let frequencyGap = null;
+  let frequencyPadRight = null;
+
+  if (frequencyCard) {
+    const frequencyCols = Array.from(frequencyCard.querySelectorAll(".more-stats-grid > .more-stats-col"));
+    const columnWidths = frequencyCols
+      .map((col) => getElementBoxWidth(col))
+      .filter((width) => width > 0);
+    const graphCount = columnWidths.length;
+    const totalFrequencyGraphWidth = columnWidths.reduce((sum, width) => sum + width, 0);
+
+    if (!graphRailWidth && totalFrequencyGraphWidth > 0) {
+      const baseGap = readCssVar("--frequency-graph-gap-base", 12, frequencyCard);
+      graphRailWidth = totalFrequencyGraphWidth + (Math.max(0, graphCount - 1) * baseGap);
+    }
+
+    if (graphRailWidth > 0 && totalFrequencyGraphWidth > 0) {
+      const totalGap = Math.max(0, graphRailWidth - totalFrequencyGraphWidth);
+      if (graphCount > 1) {
+        // Use subpixel gaps so we don't need trailing right padding that can create tiny overflow scroll.
+        frequencyGap = totalGap / (graphCount - 1);
+        frequencyPadRight = 0;
+      } else {
+        frequencyPadRight = totalGap;
+      }
+    }
+  }
+
+  const cards = [
+    ...(frequencyCard ? [frequencyCard] : []),
+    ...yearCards,
+  ];
+
+  let shouldStackSection = false;
+  const desktopLike = isDesktopLikeViewport();
+  cards.forEach((card) => {
+    const statsColumn = card.classList.contains("more-stats")
+      ? card.querySelector(".more-stats-facts.side-stats-column")
+      : card.querySelector(".card-stats.side-stats-column");
+    if (!statsColumn) return;
+
+    const measuredMain = card.classList.contains("more-stats")
+      ? getElementBoxWidth(card.querySelector(".more-stats-grid"))
+      : getElementBoxWidth(card.querySelector(".heatmap-area"));
+    const mainWidth = graphRailWidth > 0 ? graphRailWidth : measuredMain;
+    const statsWidth = getElementBoxWidth(statsColumn);
+    const sideGap = readCssVar("--stats-column-gap", 12, card);
+    const requiredWidth = mainWidth + sideGap + statsWidth;
+    const availableWidth = getElementContentWidth(card);
+    const overflow = requiredWidth - availableWidth;
+    const tolerance = desktopLike
+      ? readCssVar("--stack-overflow-tolerance-desktop", 0, card)
+      : 0;
+    if (overflow > tolerance) {
+      shouldStackSection = true;
+    }
+  });
+
+  return {
+    frequencyCard,
+    yearCards,
+    graphRailWidth,
+    frequencyGap,
+    frequencyPadRight,
+    shouldStackSection,
+  };
+}
+
+function applySectionLayoutPlan(plan) {
+  const {
+    frequencyCard,
+    yearCards,
+    graphRailWidth,
+    frequencyGap,
+    frequencyPadRight,
+    shouldStackSection,
+  } = plan;
+  const cards = [
+    ...(frequencyCard ? [frequencyCard] : []),
+    ...yearCards,
+  ];
+
+  cards.forEach((card) => {
+    if (graphRailWidth > 0) {
+      card.style.setProperty("--card-graph-rail-width", `${graphRailWidth}px`);
+    } else {
+      card.style.removeProperty("--card-graph-rail-width");
+    }
+  });
+
+  if (frequencyCard) {
+    if (Number.isFinite(frequencyGap)) {
+      frequencyCard.style.setProperty("--frequency-graph-gap", `${Math.max(0, frequencyGap)}px`);
+    } else {
+      frequencyCard.style.removeProperty("--frequency-graph-gap");
+    }
+    if (Number.isFinite(frequencyPadRight)) {
+      frequencyCard.style.setProperty("--frequency-grid-pad-right", `${Math.max(0, frequencyPadRight)}px`);
+    } else {
+      frequencyCard.style.removeProperty("--frequency-grid-pad-right");
+    }
+  }
+
+  if (frequencyCard) {
+    frequencyCard.classList.toggle("more-stats-stacked", shouldStackSection);
+    const metricChipRow = frequencyCard.querySelector(".more-stats-metric-chips");
+    const title = frequencyCard.querySelector(":scope > .labeled-card-title");
+    const facts = frequencyCard.querySelector(".more-stats-facts.side-stats-column");
+    if (metricChipRow && title && facts) {
+      const keepChipsWithTitle = shouldStackSection;
+      if (keepChipsWithTitle) {
+        title.appendChild(metricChipRow);
+        alignFrequencyMetricChipsToSecondGraphAxis(frequencyCard, title, metricChipRow);
+      } else if (facts.firstElementChild !== metricChipRow) {
+        metricChipRow.style.removeProperty("margin-left");
+        facts.insertBefore(metricChipRow, facts.firstChild);
+      }
+    }
+  }
+  yearCards.forEach((card) => {
+    card.classList.toggle("year-card-stacked", shouldStackSection);
+  });
+}
+
+function alignStackedStatsToYAxisLabels() {
+  if (!heatmaps) return;
+  resetCardLayoutState();
+  normalizeSideStatCardSize();
+
+  const plans = Array.from(heatmaps.querySelectorAll(".type-list"))
+    .map((list) => buildSectionLayoutPlan(list))
+    .filter(Boolean);
+
+  plans.forEach((plan) => {
+    applySectionLayoutPlan(plan);
+  });
+}
+
+function sundayOnOrBefore(d) {
+  const day = d.getDay();
+  const offset = day % 7; // Sunday=0
+  const result = new Date(d);
+  result.setDate(d.getDate() - offset);
+  return result;
+}
+
+function saturdayOnOrAfter(d) {
+  const day = d.getDay();
+  const offset = (6 - day + 7) % 7;
+  const result = new Date(d);
+  result.setDate(d.getDate() + offset);
+  return result;
+}
+
+function formatLocalDateKey(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function localDayNumber(date) {
+  return Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / MS_PER_DAY);
+}
+
+function weekIndexFromSundayStart(date, start) {
+  return Math.floor((localDayNumber(date) - localDayNumber(start)) / 7);
+}
+
+function weekOfYear(date) {
+  const yearStart = new Date(date.getFullYear(), 0, 1);
+  const start = sundayOnOrBefore(yearStart);
+  return weekIndexFromSundayStart(date, start) + 1;
+}
+
+function hexToRgb(hex) {
+  const cleaned = hex.replace("#", "");
+  if (cleaned.length !== 6) return null;
+  const r = parseInt(cleaned.slice(0, 2), 16);
+  const g = parseInt(cleaned.slice(2, 4), 16);
+  const b = parseInt(cleaned.slice(4, 6), 16);
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return null;
+  return { r, g, b };
+}
+
+function heatColor(hex, value, max) {
+  if (max <= 0) return DEFAULT_COLORS[0];
+  if (value <= 0) return "#0f172a";
+  const rgb = hexToRgb(hex);
+  const base = hexToRgb("#0f172a");
+  if (!rgb || !base) return hex;
+  const intensity = Math.pow(Math.min(value / max, 1), 0.75);
+  const r = Math.round(base.r + (rgb.r - base.r) * intensity);
+  const g = Math.round(base.g + (rgb.g - base.g) * intensity);
+  const b = Math.round(base.b + (rgb.b - base.b) * intensity);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function positionTooltip(x, y) {
+  const padding = 12;
+  const rect = tooltip.getBoundingClientRect();
+  const maxX = window.innerWidth - rect.width - padding;
+  const maxY = window.innerHeight - rect.height - padding;
+  const left = clamp(x + 12, padding, maxX);
+  const preferredTop = isTouch ? (y - rect.height - 12) : (y + 12);
+  const top = clamp(preferredTop, padding, maxY);
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${top}px`;
+  tooltip.style.bottom = "auto";
+}
+
+function showTooltip(text, x, y) {
+  tooltip.textContent = text;
+  if (isTouch) {
+    tooltip.classList.add("touch");
+    tooltip.style.transform = "none";
+  } else {
+    tooltip.classList.remove("touch");
+    tooltip.style.transform = "translateY(-8px)";
+  }
+  tooltip.classList.add("visible");
+  requestAnimationFrame(() => positionTooltip(x, y));
+}
+
+function hideTooltip() {
+  tooltip.classList.remove("visible");
+}
+
+function getTooltipEventPoint(event, fallbackElement) {
+  const clientX = Number(event?.clientX);
+  const clientY = Number(event?.clientY);
+  if (Number.isFinite(clientX) && Number.isFinite(clientY)) {
+    return { x: clientX, y: clientY };
+  }
+  const rect = fallbackElement?.getBoundingClientRect?.();
+  if (!rect) {
+    return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+  }
+  return {
+    x: rect.left + (rect.width / 2),
+    y: rect.top + (rect.height / 2),
+  };
+}
+
+function attachTooltip(cell, text) {
+  if (!text) return;
+  if (!isTouch) {
+    cell.addEventListener("mouseenter", (event) => {
+      showTooltip(text, event.clientX, event.clientY);
+    });
+    cell.addEventListener("mousemove", (event) => {
+      showTooltip(text, event.clientX, event.clientY);
+    });
+    cell.addEventListener("mouseleave", hideTooltip);
+    return;
+  }
+  cell.addEventListener("click", (event) => {
+    if (cell.classList.contains("active")) {
+      cell.classList.remove("active");
+      hideTooltip();
+      return;
+    }
+    const active = document.querySelector(".cell.active");
+    if (active) active.classList.remove("active");
+    cell.classList.add("active");
+    const point = getTooltipEventPoint(event, cell);
+    showTooltip(text, point.x, point.y);
+  });
+}
+
+function getColors(type) {
+  const accent = TYPE_ACCENT_OVERRIDES[type] || TYPE_META[type]?.accent || fallbackColor(type);
+  return [DEFAULT_COLORS[0], DEFAULT_COLORS[1], DEFAULT_COLORS[2], DEFAULT_COLORS[3], accent];
+}
+
+function buildMultiTypeBackgroundImage(types) {
+  const accentColors = Array.from(new Set((types || [])
+    .map((type) => getColors(type)[4])
+    .filter(Boolean)));
+  if (!accentColors.length) return "";
+  if (accentColors.length === 1) return "";
+  if (accentColors.length === 2) {
+    return `linear-gradient(135deg, ${accentColors[0]} 0 50%, ${accentColors[1]} 50% 100%)`;
+  }
+  const step = 100 / accentColors.length;
+  const stops = accentColors.map((color, index) => {
+    const start = (index * step).toFixed(2);
+    const end = ((index + 1) * step).toFixed(2);
+    return `${color} ${start}% ${end}%`;
+  });
+  return `conic-gradient(from 225deg, ${stops.join(", ")})`;
+}
+
+function displayType(type) {
+  return TYPE_META[type]?.label || prettifyType(type);
+}
+
+function summaryTypeTitle(type) {
+  return displayType(type);
+}
+
+function formatActivitiesTitle(types) {
+  if (!types || !types.length) {
+    return "Activities";
+  }
+  return `${types.map((type) => displayType(type)).join(" + ")} Activities`;
+}
+
+function pluralizeLabel(label) {
+  if (/(s|x|z|ch|sh)$/i.test(label)) return `${label}es`;
+  if (/[^aeiou]y$/i.test(label)) return `${label.slice(0, -1)}ies`;
+  return `${label}s`;
+}
+
+function getTypeCountNouns(type) {
+  if (!type || type === "all") {
+    return { singular: "activity", plural: "activities" };
+  }
+
+  const meta = TYPE_META[type] || {};
+  const singularMeta = String(meta.count_singular || meta.singular || "").trim().toLowerCase();
+  const pluralMeta = String(meta.count_plural || meta.plural || "").trim().toLowerCase();
+  if (singularMeta && pluralMeta) {
+    return { singular: singularMeta, plural: pluralMeta };
+  }
+
+  const baseLabel = String(singularMeta || meta.label || prettifyType(type)).trim().toLowerCase();
+  if (!baseLabel) {
+    return { singular: "activity", plural: "activities" };
+  }
+  if (pluralMeta) {
+    return { singular: baseLabel, plural: pluralMeta };
+  }
+
+  if (isOtherSportsType(type) || baseLabel.includes(" ") || /(ing|ion)$/i.test(baseLabel)) {
+    return {
+      singular: `${baseLabel} activity`,
+      plural: `${baseLabel} activities`,
+    };
+  }
+
+  return {
+    singular: baseLabel,
+    plural: pluralizeLabel(baseLabel),
+  };
+}
+
+function formatActivityCountLabel(count, types = []) {
+  if (Array.isArray(types) && types.length === 1) {
+    const nouns = getTypeCountNouns(types[0]);
+    return `${count} ${count === 1 ? nouns.singular : nouns.plural}`;
+  }
+  return `${count} ${count === 1 ? "Activity" : "Activities"}`;
+}
+
+function fallbackColor(type) {
+  if (!type) return FALLBACK_VAPORWAVE[0];
+  let index = 0;
+  for (let i = 0; i < type.length; i += 1) {
+    index += (i + 1) * type.charCodeAt(i);
+  }
+  return FALLBACK_VAPORWAVE[index % FALLBACK_VAPORWAVE.length];
+}
+
+function prettifyType(type) {
+  const value = String(type || "Other").trim();
+  if (TYPE_LABEL_OVERRIDES[value]) return TYPE_LABEL_OVERRIDES[value];
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .trim();
+}
+
+function formatNumber(value, fractionDigits) {
+  return new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+    useGrouping: true,
+  }).format(value);
+}
+
+function formatDistance(meters, units) {
+  if (units.distance === "km") {
+    return `${formatNumber(meters / 1000, 1)} km`;
+  }
+  return `${formatNumber(meters / 1609.344, 1)} mi`;
+}
+
+function formatDuration(seconds) {
+  const minutes = Math.round(seconds / 60);
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    return `${formatNumber(hours, 0)}h ${minutes % 60}m`;
+  }
+  return `${minutes}m`;
+}
+
+function formatElevation(meters, units) {
+  if (units.elevation === "m") {
+    return `${formatNumber(Math.round(meters), 0)} m`;
+  }
+  return `${formatNumber(Math.round(meters * 3.28084), 0)} ft`;
+}
+
+function buildYearMetricStatItems(totals, units) {
+  return [
+    {
+      key: "distance",
+      label: "Total Distance",
+      value: totals.distance > 0
+        ? formatDistance(totals.distance, units || { distance: "mi" })
+        : STAT_PLACEHOLDER,
+      filterable: totals.distance > 0,
+    },
+    {
+      key: "moving_time",
+      label: "Total Time",
+      value: formatDuration(totals.moving_time),
+      filterable: totals.moving_time > 0,
+    },
+    {
+      key: "elevation_gain",
+      label: "Total Elevation",
+      value: totals.elevation > 0
+        ? formatElevation(totals.elevation, units || { elevation: "ft" })
+        : STAT_PLACEHOLDER,
+      filterable: totals.elevation > 0,
+    },
+  ];
+}
+
+const FREQUENCY_METRIC_ITEMS = [
+  { key: "distance", label: "Distance" },
+  { key: "moving_time", label: "Time" },
+  { key: "elevation_gain", label: "Elevation" },
+];
+
+const FREQUENCY_METRIC_UNAVAILABLE_REASON_BY_KEY = {
+  distance: "No distance data in current selection.",
+  moving_time: "No time data in current selection.",
+  elevation_gain: "No elevation data in current selection.",
+};
+
+function getFrequencyMetricUnavailableReason(metricKey, metricLabel) {
+  return FREQUENCY_METRIC_UNAVAILABLE_REASON_BY_KEY[metricKey]
+    || `No ${String(metricLabel || "metric").toLowerCase()} data in current selection.`;
+}
+
+function formatMetricTotal(metricKey, value, units) {
+  if (metricKey === "distance") {
+    return formatDistance(value, units || { distance: "mi" });
+  }
+  if (metricKey === "moving_time") {
+    return formatDuration(value);
+  }
+  if (metricKey === "elevation_gain") {
+    return formatElevation(value, units || { elevation: "ft" });
+  }
+  return formatNumber(value, 0);
+}
+
+function formatHourLabel(hour) {
+  const suffix = hour < 12 ? "a" : "p";
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${hour12}${suffix}`;
+}
+
+function isOtherSportsType(type) {
+  return String(type || "") === String(OTHER_BUCKET || "OtherSports");
+}
+
+function getActivitySubtypeLabel(activity) {
+  const rawSubtype = activity?.subtype || activity?.raw_type;
+  const value = String(rawSubtype || "").trim();
+  if (!value) return "";
+  if (isOtherSportsType(activity?.type) && value === String(activity?.type || "")) {
+    return "";
+  }
+  return TYPE_META[value]?.label || prettifyType(value);
+}
+
+function createTooltipBreakdown() {
+  return {
+    typeCounts: {},
+    otherSubtypeCounts: {},
+  };
+}
+
+function addTooltipBreakdownCount(breakdown, activityType, subtypeLabel) {
+  if (!breakdown) return;
+  breakdown.typeCounts[activityType] = (breakdown.typeCounts[activityType] || 0) + 1;
+  if (isOtherSportsType(activityType) && subtypeLabel) {
+    breakdown.otherSubtypeCounts[subtypeLabel] = (breakdown.otherSubtypeCounts[subtypeLabel] || 0) + 1;
+  }
+}
+
+function sortBreakdownEntries(counts) {
+  return Object.entries(counts || {})
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      return String(a[0]).localeCompare(String(b[0]));
+    });
+}
+
+function formatTypeBreakdownLines(breakdown, types) {
+  const lines = [];
+  const typeCounts = breakdown?.typeCounts || {};
+  const subtypeEntries = sortBreakdownEntries(breakdown?.otherSubtypeCounts || {});
+  const selectedTypes = Array.isArray(types) ? types : [];
+  const showTypeBreakdown = selectedTypes.length > 1;
+  let otherSportsLineRendered = false;
+
+  if (showTypeBreakdown) {
+    selectedTypes.forEach((type) => {
+      const count = typeCounts[type] || 0;
+      if (count <= 0) return;
+      const otherType = isOtherSportsType(type);
+      lines.push(`${displayType(type)}: ${count}`);
+      if (!otherType || !subtypeEntries.length) return;
+      otherSportsLineRendered = true;
+      subtypeEntries.forEach(([subtype, subtypeCount]) => {
+        lines.push(`  - ${subtype}: ${subtypeCount}`);
+      });
+    });
+  }
+
+  if (subtypeEntries.length && !otherSportsLineRendered) {
+    const otherTotal = typeCounts[OTHER_BUCKET]
+      || subtypeEntries.reduce((sum, [, count]) => sum + count, 0);
+    if (otherTotal > 0) {
+      lines.push(`${displayType(OTHER_BUCKET)}: ${otherTotal}`);
+    }
+    subtypeEntries.forEach(([subtype, count]) => {
+      lines.push(`  - ${subtype}: ${count}`);
+    });
+  }
+
+  return lines;
+}
+
+function getSingleActivityTooltipTypeLabel(typeBreakdown, entry, typeLabels) {
+  if (Number(entry?.count || 0) !== 1) {
+    return "";
+  }
+
+  const typeEntries = sortBreakdownEntries(typeBreakdown?.typeCounts || {});
+  if (typeEntries.length === 1 && Number(typeEntries[0][1]) === 1) {
+    const activityType = String(typeEntries[0][0] || "").trim();
+    if (activityType) {
+      if (isOtherSportsType(activityType)) {
+        const subtypeEntries = sortBreakdownEntries(typeBreakdown?.otherSubtypeCounts || {});
+        if (subtypeEntries.length === 1 && Number(subtypeEntries[0][1]) === 1) {
+          return String(subtypeEntries[0][0] || "").trim();
+        }
+      }
+      return displayType(activityType);
+    }
+  }
+
+  if (Array.isArray(typeLabels) && typeLabels.length === 1) {
+    return String(typeLabels[0] || "").replace(/\s+subtype$/i, "").trim();
+  }
+  if (Array.isArray(entry?.types) && entry.types.length === 1) {
+    return displayType(entry.types[0]);
+  }
+  return "";
+}
+
+function formatTooltipBreakdown(total, breakdown, types) {
+  const lines = [`Total: ${formatActivityCountLabel(total, types)}`];
+  const detailLines = formatTypeBreakdownLines(breakdown, types);
+  if (!detailLines.length) {
+    return lines.join("\n");
+  }
+  lines.push(...detailLines);
+  return lines.join("\n");
+}
+
+function buildCombinedTypeDetailsByDate(payload, types, years) {
+  const detailsByDate = {};
+  const typeBreakdownsByDate = {};
+  const activities = getFilteredActivities(payload, types, years);
+
+  activities.forEach((activity) => {
+    const dateStr = String(activity.date || "");
+    if (!dateStr) return;
+    if (!detailsByDate[dateStr]) {
+      detailsByDate[dateStr] = {
+        normalTypes: new Set(),
+        otherSubtypeLabels: new Set(),
+        hasOtherSports: false,
+      };
+    }
+    if (!typeBreakdownsByDate[dateStr]) {
+      typeBreakdownsByDate[dateStr] = createTooltipBreakdown();
+    }
+    const details = detailsByDate[dateStr];
+    const activityType = String(activity.type || "");
+    const subtypeLabel = getActivitySubtypeLabel(activity);
+    addTooltipBreakdownCount(typeBreakdownsByDate[dateStr], activityType, subtypeLabel);
+    if (isOtherSportsType(activityType)) {
+      details.hasOtherSports = true;
+      if (subtypeLabel) {
+        details.otherSubtypeLabels.add(`${subtypeLabel} subtype`);
+      }
+      return;
+    }
+    details.normalTypes.add(activityType);
+  });
+
+  const orderedTypes = Array.isArray(types) ? types : [];
+  const typeLabelsByDate = {};
+
+  Object.entries(detailsByDate).forEach(([dateStr, details]) => {
+    const labels = [];
+    orderedTypes.forEach((type) => {
+      if (!isOtherSportsType(type) && details.normalTypes.has(type)) {
+        labels.push(displayType(type));
+      }
+    });
+
+    const extraTypes = Array.from(details.normalTypes)
+      .filter((type) => !isOtherSportsType(type) && !orderedTypes.includes(type))
+      .map((type) => displayType(type))
+      .sort((a, b) => a.localeCompare(b));
+    labels.push(...extraTypes);
+
+    const subtypeLabels = Array.from(details.otherSubtypeLabels).sort((a, b) => a.localeCompare(b));
+    if (subtypeLabels.length) {
+      labels.push(...subtypeLabels);
+    } else if (details.hasOtherSports) {
+      labels.push(displayType(OTHER_BUCKET));
+    }
+
+    typeLabelsByDate[dateStr] = labels;
+  });
+
+  return { typeLabelsByDate, typeBreakdownsByDate };
+}
+
+function buildSummary(
+  payload,
+  types,
+  years,
+  showTypeBreakdown,
+  showActiveDays,
+  typeCardTypes,
+  activeTypeCards,
+  hoverClearedType,
+  onTypeCardSelect,
+  onTypeCardHoverReset,
+  activeYearMetricKey,
+  hoverClearedYearMetricKey,
+  onYearMetricCardSelect,
+  onYearMetricCardHoverReset,
+) {
+  summary.innerHTML = "";
+  summary.classList.remove(
+    "summary-center-two-types",
+    "summary-center-three-types",
+    "summary-center-four-types",
+    "summary-center-tail-one",
+    "summary-center-tail-two",
+    "summary-center-tail-three",
+    "summary-center-tail-four",
+  );
+
+  const totals = {
+    count: 0,
+    distance: 0,
+    moving_time: 0,
+    elevation: 0,
+  };
+  const typeTotals = {};
+  const selectedTypeSet = new Set(types);
+  const typeCardsList = Array.isArray(typeCardTypes) && typeCardTypes.length
+    ? typeCardTypes.slice()
+    : types.slice();
+  const visibleTypeCardsList = typeCardsList.length > 1
+    ? typeCardsList
+    : [];
+  const typeCardSet = new Set(visibleTypeCardsList);
+  const activeDays = new Set();
+
+  Object.entries(payload.aggregates || {}).forEach(([year, yearData]) => {
+    if (!years.includes(Number(year))) return;
+    Object.entries(yearData || {}).forEach(([type, entries]) => {
+      const includeTotals = selectedTypeSet.has(type);
+      const includeTypeCardCount = typeCardSet.has(type);
+      if (!includeTotals && !includeTypeCardCount) return;
+      if (includeTypeCardCount && !typeTotals[type]) {
+        typeTotals[type] = { count: 0 };
+      }
+      Object.entries(entries || {}).forEach(([dateStr, entry]) => {
+        if (includeTotals && (entry.count || 0) > 0) {
+          activeDays.add(dateStr);
+        }
+        if (includeTotals) {
+          totals.count += entry.count || 0;
+          totals.distance += entry.distance || 0;
+          totals.moving_time += entry.moving_time || 0;
+          totals.elevation += entry.elevation_gain || 0;
+        }
+        if (includeTypeCardCount) {
+          typeTotals[type].count += entry.count || 0;
+        }
+      });
+    });
+  });
+
+  const cards = [
+    { title: "Total Activities", value: totals.count.toLocaleString() },
+  ];
+  if (showActiveDays) {
+    cards.push({ title: "Active Days", value: activeDays.size.toLocaleString() });
+  }
+  cards.push(
+    {
+      title: "Total Time",
+      value: formatDuration(totals.moving_time),
+      metricKey: "moving_time",
+      filterable: totals.moving_time > 0,
+    },
+    {
+      title: "Total Distance",
+      value: totals.distance > 0
+        ? formatDistance(totals.distance, payload.units || { distance: "mi" })
+        : STAT_PLACEHOLDER,
+      metricKey: "distance",
+      filterable: totals.distance > 0,
+    },
+    {
+      title: "Total Elevation",
+      value: totals.elevation > 0
+        ? formatElevation(totals.elevation, payload.units || { elevation: "ft" })
+        : STAT_PLACEHOLDER,
+      metricKey: "elevation_gain",
+      filterable: totals.elevation > 0,
+    },
+  );
+
+  cards.forEach((card) => {
+    const metricKey = typeof card.metricKey === "string" ? card.metricKey : "";
+    const isMetricCard = Boolean(metricKey);
+    const canToggleMetric = isMetricCard
+      && card.filterable
+      && typeof onYearMetricCardSelect === "function";
+    const el = document.createElement(canToggleMetric ? "button" : "div");
+    if (canToggleMetric) {
+      const isActiveMetric = activeYearMetricKey === metricKey;
+      el.type = "button";
+      el.className = "summary-card summary-card-action summary-year-metric-card";
+      el.dataset.metricKey = metricKey;
+      el.classList.toggle("active", isActiveMetric);
+      if (!isActiveMetric && hoverClearedYearMetricKey === metricKey) {
+        el.classList.add("summary-glow-cleared");
+      }
+      el.setAttribute("aria-pressed", isActiveMetric ? "true" : "false");
+      el.title = `Filter all year cards: ${card.title}`;
+      el.addEventListener("click", () => {
+        const currentlyActive = el.classList.contains("active");
+        onYearMetricCardSelect(metricKey, currentlyActive);
+      });
+      if (onYearMetricCardHoverReset) {
+        el.addEventListener("pointerleave", () => {
+          if (el.classList.contains("summary-glow-cleared")) {
+            el.classList.remove("summary-glow-cleared");
+          }
+          onYearMetricCardHoverReset(metricKey);
+        });
+      }
+    } else {
+      el.className = "summary-card";
+    }
+    const title = document.createElement("div");
+    title.className = "summary-title";
+    title.textContent = card.title;
+    const value = document.createElement("div");
+    value.className = "summary-value";
+    value.textContent = card.value;
+    el.appendChild(title);
+    el.appendChild(value);
+    summary.appendChild(el);
+  });
+
+  if (showTypeBreakdown && visibleTypeCardsList.length) {
+    const typeCardCount = visibleTypeCardsList.length;
+    const centerTailCards = typeCardCount > 5 ? typeCardCount % 5 : 0;
+    summary.classList.toggle("summary-center-two-types", visibleTypeCardsList.length === 2);
+    summary.classList.toggle("summary-center-three-types", visibleTypeCardsList.length === 3);
+    summary.classList.toggle("summary-center-four-types", visibleTypeCardsList.length === 4);
+    summary.classList.toggle("summary-center-tail-one", centerTailCards === 1);
+    summary.classList.toggle("summary-center-tail-two", centerTailCards === 2);
+    summary.classList.toggle("summary-center-tail-three", centerTailCards === 3);
+    summary.classList.toggle("summary-center-tail-four", centerTailCards === 4);
+
+    visibleTypeCardsList.forEach((type) => {
+      const typeCard = document.createElement("button");
+      typeCard.type = "button";
+      typeCard.className = "summary-card summary-card-action summary-type-card";
+      const isActiveTypeCard = Boolean(activeTypeCards && activeTypeCards.has(type));
+      typeCard.classList.toggle("active", isActiveTypeCard);
+      if (!isActiveTypeCard && hoverClearedType === type) {
+        typeCard.classList.add("summary-glow-cleared");
+      }
+      typeCard.setAttribute("aria-pressed", isActiveTypeCard ? "true" : "false");
+      typeCard.title = `Filter: ${displayType(type)}`;
+      const title = document.createElement("div");
+      title.className = "summary-title";
+      title.textContent = summaryTypeTitle(type);
+      const value = document.createElement("div");
+      value.className = "summary-type";
+      const dot = document.createElement("span");
+      dot.className = "summary-dot";
+      dot.style.background = getColors(type)[4];
+      const text = document.createElement("span");
+      text.textContent = (typeTotals[type]?.count || 0).toLocaleString();
+      value.appendChild(dot);
+      value.appendChild(text);
+      typeCard.appendChild(title);
+      typeCard.appendChild(value);
+      if (onTypeCardHoverReset) {
+        typeCard.addEventListener("pointerleave", () => {
+          if (typeCard.classList.contains("summary-glow-cleared")) {
+            typeCard.classList.remove("summary-glow-cleared");
+          }
+          onTypeCardHoverReset(type);
+        });
+      }
+      if (onTypeCardSelect) {
+        typeCard.addEventListener("click", () => onTypeCardSelect(type, isActiveTypeCard));
+      }
+      summary.appendChild(typeCard);
+    });
+  }
+}
+
+function buildHeatmapArea(aggregates, year, units, colors, type, layout, options = {}) {
+  const heatmapArea = document.createElement("div");
+  heatmapArea.className = "heatmap-area";
+  const metricHeatmapKey = typeof options.metricHeatmapKey === "string"
+    ? options.metricHeatmapKey
+    : null;
+  const metricHeatmapMax = metricHeatmapKey
+    ? Number(options.metricMaxByKey?.[metricHeatmapKey] || 0)
+    : 0;
+  const metricHeatmapActive = Boolean(metricHeatmapKey) && metricHeatmapMax > 0;
+  const metricHeatmapColor = options.metricHeatmapColor || colors[4];
+  const metricHeatmapEmptyColor = options.metricHeatmapEmptyColor || DEFAULT_COLORS[0];
+
+  const monthRow = document.createElement("div");
+  monthRow.className = "month-row";
+  monthRow.style.paddingLeft = `${layout.gridPadLeft}px`;
+  heatmapArea.appendChild(monthRow);
+
+  const dayCol = document.createElement("div");
+  dayCol.className = "day-col";
+  dayCol.style.paddingTop = `${layout.gridPadTop}px`;
+  dayCol.style.gap = `${layout.gap}px`;
+  DAYS.forEach((label) => {
+    const dayLabel = document.createElement("div");
+    dayLabel.className = "day-label";
+    dayLabel.textContent = label;
+    dayLabel.style.height = `${layout.cell}px`;
+    dayLabel.style.lineHeight = `${layout.cell}px`;
+    dayCol.appendChild(dayLabel);
+  });
+  heatmapArea.appendChild(dayCol);
+
+  const yearStart = new Date(year, 0, 1);
+  const yearEnd = new Date(year, 11, 31);
+  const start = sundayOnOrBefore(yearStart);
+  const end = saturdayOnOrAfter(yearEnd);
+
+  for (let month = 0; month < 12; month += 1) {
+    const monthStart = new Date(year, month, 1);
+    const weekIndex = weekIndexFromSundayStart(monthStart, start);
+    const monthLabel = document.createElement("div");
+    monthLabel.className = "month-label";
+    monthLabel.textContent = MONTHS[month];
+    monthLabel.style.left = `${weekIndex * (layout.cell + layout.gap)}px`;
+    monthRow.appendChild(monthLabel);
+  }
+
+  const grid = document.createElement("div");
+  grid.className = "grid";
+
+  for (let day = new Date(start); day <= end; day.setDate(day.getDate() + 1)) {
+    const dateStr = formatLocalDateKey(day);
+    const inYear = day.getFullYear() === year;
+    const entry = (aggregates && aggregates[dateStr]) || {
+      count: 0,
+      distance: 0,
+      moving_time: 0,
+      elevation_gain: 0,
+      activity_ids: [],
+    };
+
+    const weekIndex = weekIndexFromSundayStart(day, start);
+    const row = day.getDay(); // Sunday=0
+
+    const cell = document.createElement("div");
+    cell.className = "cell";
+    cell.style.gridColumn = weekIndex + 1;
+    cell.style.gridRow = row + 1;
+
+    if (!inYear) {
+      cell.classList.add("outside");
+      grid.appendChild(cell);
+      continue;
+    }
+
+    const filled = (entry.count || 0) > 0;
+    if (metricHeatmapActive) {
+      const metricValue = Number(entry[metricHeatmapKey] || 0);
+      cell.style.backgroundImage = "none";
+      cell.style.background = metricValue > 0
+        ? heatColor(metricHeatmapColor, metricValue, metricHeatmapMax)
+        : metricHeatmapEmptyColor;
+    } else if (filled && typeof options.colorForEntry === "function") {
+      const entryColor = options.colorForEntry(entry);
+      const backgroundColor = typeof entryColor === "object" && entryColor !== null
+        ? String(entryColor.background || colors[0])
+        : String(entryColor || colors[0]);
+      const backgroundImage = typeof entryColor === "object" && entryColor !== null
+        ? String(entryColor.backgroundImage || "").trim()
+        : "";
+      cell.style.background = backgroundColor;
+      cell.style.backgroundImage = backgroundImage || "none";
+    } else {
+      cell.style.backgroundImage = "none";
+      cell.style.background = filled ? colors[4] : colors[0];
+    }
+
+    const durationMinutes = Math.round((entry.moving_time || 0) / 60);
+    const duration = durationMinutes >= 60
+      ? `${Math.floor(durationMinutes / 60)}h ${durationMinutes % 60}m`
+      : `${durationMinutes}m`;
+
+    const typeBreakdown = type === "all" ? options.typeBreakdownsByDate?.[dateStr] : null;
+    const typeLabels = type === "all" ? options.typeLabelsByDate?.[dateStr] : null;
+    const singleTypeLabel = type === "all"
+      ? getSingleActivityTooltipTypeLabel(typeBreakdown, entry, typeLabels)
+      : "";
+    const lines = [
+      dateStr,
+      singleTypeLabel
+        ? `1 ${singleTypeLabel} Activity`
+        : formatActivityCountLabel(entry.count, type === "all" ? [] : [type]),
+    ];
+
+    const showDistanceElevation = (entry.distance || 0) > 0 || (entry.elevation_gain || 0) > 0;
+
+    if (type === "all") {
+      if (!singleTypeLabel) {
+        const breakdownLines = formatTypeBreakdownLines(typeBreakdown, options.selectedTypes || []);
+        if (breakdownLines.length) {
+          lines.push(...breakdownLines);
+        } else if (Array.isArray(typeLabels) && typeLabels.length) {
+          lines.push(`Types: ${typeLabels.join(", ")}`);
+        } else if (entry.types && entry.types.length) {
+          lines.push(`Types: ${entry.types.map(displayType).join(", ")}`);
+        }
+      }
+    }
+
+    if (showDistanceElevation) {
+      const distance = units.distance === "km"
+        ? `${(entry.distance / 1000).toFixed(2)} km`
+        : `${(entry.distance / 1609.344).toFixed(2)} mi`;
+      const elevation = units.elevation === "m"
+        ? `${Math.round(entry.elevation_gain)} m`
+        : `${Math.round(entry.elevation_gain * 3.28084)} ft`;
+      lines.push(`Distance: ${distance}`);
+      lines.push(`Elevation: ${elevation}`);
+    }
+
+    lines.push(`Duration: ${duration}`);
+    const tooltipText = lines.join("\n");
+    if (!isTouch) {
+      cell.addEventListener("mouseenter", (event) => {
+        showTooltip(tooltipText, event.clientX, event.clientY);
+      });
+      cell.addEventListener("mousemove", (event) => {
+        showTooltip(tooltipText, event.clientX, event.clientY);
+      });
+      cell.addEventListener("mouseleave", hideTooltip);
+    } else {
+      cell.addEventListener("click", (event) => {
+        if (cell.classList.contains("active")) {
+          cell.classList.remove("active");
+          hideTooltip();
+          return;
+        }
+        const active = grid.querySelector(".cell.active");
+        if (active) active.classList.remove("active");
+        cell.classList.add("active");
+        const point = getTooltipEventPoint(event, cell);
+        showTooltip(tooltipText, point.x, point.y);
+      });
+    }
+
+    grid.appendChild(cell);
+  }
+
+  heatmapArea.appendChild(grid);
+  return heatmapArea;
+}
+
+function buildSideStatCard(labelText, valueText, options = {}) {
+  const {
+    tagName = "div",
+    className = "card-stat",
+    extraClasses = [],
+    disabled = false,
+    ariaPressed = null,
+  } = options;
+
+  const card = document.createElement(tagName);
+  card.className = className;
+  extraClasses.forEach((name) => {
+    if (name) {
+      card.classList.add(name);
+    }
+  });
+
+  if (tagName.toLowerCase() === "button") {
+    card.type = "button";
+    card.disabled = Boolean(disabled);
+  }
+  if (ariaPressed !== null) {
+    card.setAttribute("aria-pressed", ariaPressed ? "true" : "false");
+  }
+
+  const label = document.createElement("div");
+  label.className = "card-stat-label";
+  label.textContent = labelText;
+  const value = document.createElement("div");
+  value.className = "card-stat-value";
+  value.textContent = valueText;
+  card.appendChild(label);
+  card.appendChild(value);
+  return card;
+}
+
+function buildSideStatColumn(items, options = {}) {
+  const column = document.createElement("div");
+  column.className = options.className || "card-stats side-stats-column";
+  (items || []).forEach((item) => {
+    if (!item) return;
+    const card = buildSideStatCard(item.label, item.value, item.cardOptions || {});
+    if (typeof item.enhance === "function") {
+      item.enhance(card);
+    }
+    column.appendChild(card);
+  });
+  return column;
+}
+
+function getFilterableKeys(items) {
+  return (Array.isArray(items) ? items : [])
+    .filter((item) => item && item.filterable)
+    .map((item) => item.key);
+}
+
+function normalizeSingleSelectKey(activeKey, filterableKeys) {
+  return filterableKeys.includes(activeKey) ? activeKey : null;
+}
+
+function renderSingleSelectButtonState(items, buttonMap, activeKey) {
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const button = buttonMap.get(item.key);
+    if (!button) return;
+    const active = activeKey === item.key;
+    button.classList.toggle("active", active);
+    if (active) {
+      button.classList.remove("fact-glow-cleared");
+    }
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+}
+
+function attachSingleSelectCardToggle(button, options = {}) {
+  const {
+    itemKey,
+    getActiveKey,
+    setActiveKey,
+    onToggleComplete,
+    clearedClassName = "fact-glow-cleared",
+  } = options;
+  if (!button) return;
+  if (typeof getActiveKey !== "function" || typeof setActiveKey !== "function") return;
+  button.addEventListener("click", () => {
+    const clearing = getActiveKey() === itemKey;
+    setActiveKey(clearing ? null : itemKey);
+    if (clearing) {
+      button.classList.add(clearedClassName);
+      button.blur();
+    } else {
+      button.classList.remove(clearedClassName);
+    }
+    if (typeof onToggleComplete === "function") {
+      onToggleComplete();
+    }
+  });
+  if (!isTouch) {
+    button.addEventListener("pointerleave", () => {
+      button.classList.remove(clearedClassName);
+    });
+  }
+}
+
+function buildCard(type, year, aggregates, units, options = {}) {
+  const card = document.createElement("div");
+  card.className = "card year-card";
+
+  const body = document.createElement("div");
+  body.className = "card-body";
+
+  const colors = type === "all" ? DEFAULT_COLORS : getColors(type);
+  const metricHeatmapColor = options.metricHeatmapColor || (type === "all" ? MULTI_TYPE_COLOR : colors[4]);
+  const metricMaxByKey = {
+    distance: 0,
+    moving_time: 0,
+    elevation_gain: 0,
+  };
+  const layout = getLayout();
+  const heatmapOptions = {
+    ...options,
+    metricMaxByKey,
+    metricHeatmapColor,
+    metricHeatmapEmptyColor: DEFAULT_COLORS[0],
+  };
+  const cardMetricYear = Number(options.cardMetricYear);
+  const onYearMetricStateChange = typeof options.onYearMetricStateChange === "function"
+    ? options.onYearMetricStateChange
+    : null;
+  let activeMetricKey = typeof options.initialMetricKey === "string"
+    ? options.initialMetricKey
+    : null;
+  let heatmapArea = null;
+
+  const totals = {
+    count: 0,
+    distance: 0,
+    moving_time: 0,
+    elevation: 0,
+  };
+  Object.entries(aggregates || {}).forEach(([, entry]) => {
+    totals.count += entry.count || 0;
+    totals.distance += entry.distance || 0;
+    totals.moving_time += entry.moving_time || 0;
+    totals.elevation += entry.elevation_gain || 0;
+    metricMaxByKey.distance = Math.max(metricMaxByKey.distance, Number(entry.distance || 0));
+    metricMaxByKey.moving_time = Math.max(metricMaxByKey.moving_time, Number(entry.moving_time || 0));
+    metricMaxByKey.elevation_gain = Math.max(metricMaxByKey.elevation_gain, Number(entry.elevation_gain || 0));
+  });
+
+  const renderHeatmap = () => {
+    const nextHeatmapArea = buildHeatmapArea(aggregates, year, units, colors, type, layout, {
+      ...heatmapOptions,
+      metricHeatmapKey: activeMetricKey,
+    });
+    if (heatmapArea && heatmapArea.parentNode === body) {
+      body.replaceChild(nextHeatmapArea, heatmapArea);
+    } else {
+      body.appendChild(nextHeatmapArea);
+    }
+    heatmapArea = nextHeatmapArea;
+  };
+
+  const metricItems = buildYearMetricStatItems(totals, units);
+  const filterableMetricKeys = getFilterableKeys(metricItems);
+  activeMetricKey = normalizeSingleSelectKey(activeMetricKey, filterableMetricKeys);
+  const metricButtons = new Map();
+  const reportYearMetricState = (source) => {
+    if (!onYearMetricStateChange || !Number.isFinite(cardMetricYear)) return;
+    onYearMetricStateChange({
+      year: cardMetricYear,
+      metricKey: activeMetricKey,
+      filterableMetricKeys: filterableMetricKeys.slice(),
+      source,
+    });
+  };
+  const renderMetricButtonState = () => renderSingleSelectButtonState(
+    metricItems,
+    metricButtons,
+    activeMetricKey,
+  );
+
+  const statItems = [
+    { label: "Total Activities", value: totals.count.toLocaleString() },
+    ...metricItems.map((item) => ({
+      label: item.label,
+      value: item.value,
+      cardOptions: item.filterable
+        ? {
+          tagName: "button",
+          className: "card-stat more-stats-fact-card more-stats-fact-button",
+          extraClasses: [`year-metric-${item.key.replace(/_/g, "-")}`],
+          ariaPressed: false,
+        }
+        : undefined,
+      enhance: (statCard) => {
+        if (!item.filterable) return;
+        metricButtons.set(item.key, statCard);
+        attachSingleSelectCardToggle(statCard, {
+          itemKey: item.key,
+          getActiveKey: () => activeMetricKey,
+          setActiveKey: (nextMetricKey) => {
+            activeMetricKey = nextMetricKey;
+          },
+          onToggleComplete: () => {
+            renderMetricButtonState();
+            renderHeatmap();
+            reportYearMetricState("card");
+            schedulePostInteractionAlignment();
+          },
+        });
+      },
+    })),
+  ];
+  const stats = buildSideStatColumn(statItems, { className: "card-stats side-stats-column" });
+  renderHeatmap();
+  renderMetricButtonState();
+  reportYearMetricState("init");
+
+  body.appendChild(stats);
+  card.appendChild(body);
+  return card;
+}
+
+function buildEmptyYearCard(type, year, labelOverride) {
+  const card = document.createElement("div");
+  card.className = "card card-empty-year";
+  const body = document.createElement("div");
+  body.className = "card-empty-year-body";
+  const label = labelOverride || displayType(type);
+  const normalizedLabel = String(label).trim().toLowerCase();
+  const activityLabel = normalizedLabel.endsWith(" activities") || normalizedLabel.endsWith(" activity")
+    ? normalizedLabel
+    : `${normalizedLabel} activities`;
+  const emptyMessage = `No ${activityLabel} in ${year}`;
+
+  const emptyStat = buildSideStatCard(emptyMessage, "", {
+    className: "card-stat card-empty-year-stat",
+  });
+  body.appendChild(emptyStat);
+  card.appendChild(body);
+  return card;
+}
+
+function buildEmptySelectionCard(types, years) {
+  const selectedTypes = Array.isArray(types) ? types.filter(Boolean) : [];
+  const label = selectedTypes.length
+    ? selectedTypes.map((type) => displayType(type)).join(" + ")
+    : "activities";
+  const year = Array.isArray(years) && years.length ? years[0] : 0;
+  const fallbackType = selectedTypes[0] || "all";
+  return buildEmptyYearCard(fallbackType, year, label);
+}
+
+function buildLabeledCardRow(label, card, kind) {
+  const row = document.createElement("div");
+  row.className = "labeled-card-row";
+  if (kind) {
+    row.classList.add(`labeled-card-row-${kind}`);
+  }
+  if (card?.classList?.contains("card")) {
+    card.classList.add("card-with-labeled-title");
+  }
+
+  const title = document.createElement("div");
+  title.className = "card-title labeled-card-title";
+  title.textContent = label;
+
+  card.insertBefore(title, card.firstChild);
+  row.appendChild(card);
+  return row;
+}
+
+function combineYearAggregates(yearData, types) {
+  const combined = {};
+  types.forEach((type) => {
+    const entries = yearData?.[type] || {};
+    Object.entries(entries).forEach(([dateStr, entry]) => {
+      if (!combined[dateStr]) {
+        combined[dateStr] = {
+          count: 0,
+          distance: 0,
+          moving_time: 0,
+          elevation_gain: 0,
+          types: new Set(),
+        };
+      }
+      combined[dateStr].count += entry.count || 0;
+      combined[dateStr].distance += entry.distance || 0;
+      combined[dateStr].moving_time += entry.moving_time || 0;
+      combined[dateStr].elevation_gain += entry.elevation_gain || 0;
+      if ((entry.count || 0) > 0) {
+        combined[dateStr].types.add(type);
+      }
+    });
+  });
+
+  const result = {};
+  Object.entries(combined).forEach(([dateStr, entry]) => {
+    result[dateStr] = {
+      count: entry.count,
+      distance: entry.distance,
+      moving_time: entry.moving_time,
+      elevation_gain: entry.elevation_gain,
+      types: Array.from(entry.types),
+    };
+  });
+  return result;
+}
+
+function getFilteredActivities(payload, types, years) {
+  const activities = payload.activities || [];
+  if (!activities.length) return [];
+  const yearSet = new Set(years.map(Number));
+  const typeSet = new Set(types);
+  return activities.filter((activity) => (
+    typeSet.has(activity.type) && yearSet.has(Number(activity.year))
+  ));
+}
+
+function getTypeYearTotals(payload, type, years) {
+  const totals = new Map();
+  years.forEach((year) => {
+    const entries = payload.aggregates?.[String(year)]?.[type] || {};
+    let total = 0;
+    Object.values(entries).forEach((entry) => {
+      total += entry.count || 0;
+    });
+    totals.set(year, total);
+  });
+  return totals;
+}
+
+function getTypesYearTotals(payload, types, years) {
+  if (types.length === 1) {
+    return getTypeYearTotals(payload, types[0], years);
+  }
+  const totals = new Map();
+  years.forEach((year) => {
+    const yearData = payload.aggregates?.[String(year)] || {};
+    let total = 0;
+    types.forEach((type) => {
+      Object.values(yearData?.[type] || {}).forEach((entry) => {
+        total += entry.count || 0;
+      });
+    });
+    totals.set(year, total);
+  });
+  return totals;
+}
+
+function getVisibleYears(years) {
+  return years.slice().sort((a, b) => b - a);
+}
+
+function getActivityFrequencyCardColor(types) {
+  if (types.length === 1) {
+    return getColors(types[0])[4];
+  }
+  return MULTI_TYPE_COLOR;
+}
+
+function buildStatPanel(title, subtitle) {
+  const panel = document.createElement("div");
+  panel.className = "stat-panel";
+  if (title) {
+    const titleEl = document.createElement("div");
+    titleEl.className = "card-title";
+    titleEl.textContent = title;
+    panel.appendChild(titleEl);
+  }
+  if (subtitle) {
+    const subtitleEl = document.createElement("div");
+    subtitleEl.className = "stat-subtitle";
+    subtitleEl.textContent = subtitle;
+    panel.appendChild(subtitleEl);
+  }
+  const body = document.createElement("div");
+  body.className = "stat-body";
+  panel.appendChild(body);
+  return { panel, body };
+}
+
+function buildStatsOverview(payload, types, years, color, options = {}) {
+  const card = document.createElement("div");
+  card.className = "card more-stats";
+
+  const body = document.createElement("div");
+  body.className = "more-stats-body";
+
+  const graphs = document.createElement("div");
+  graphs.className = "more-stats-grid";
+  const facts = buildSideStatColumn([], { className: "more-stats-facts side-stats-column" });
+  const metricChipRow = document.createElement("div");
+  metricChipRow.className = "more-stats-metric-chips";
+  const factGrid = document.createElement("div");
+  factGrid.className = "more-stats-fact-grid";
+
+  const yearsDesc = years.slice().sort((a, b) => b - a);
+  const emptyColor = DEFAULT_COLORS[0];
+  const selectedYearSet = new Set(yearsDesc.map(Number));
+  const units = payload.units || { distance: "mi", elevation: "ft" };
+  const onFactStateChange = typeof options.onFactStateChange === "function"
+    ? options.onFactStateChange
+    : null;
+  const onMetricStateChange = typeof options.onMetricStateChange === "function"
+    ? options.onMetricStateChange
+    : null;
+  let activeFactKey = typeof options.initialFactKey === "string"
+    ? options.initialFactKey
+    : null;
+  let activeMetricKey = typeof options.initialMetricKey === "string"
+    ? options.initialMetricKey
+    : null;
+  const aggregateYears = payload.aggregates || {};
+  const activities = getFilteredActivities(payload, types, yearsDesc)
+    .map((activity) => {
+      const dateStr = String(activity.date || "");
+      const date = new Date(`${dateStr}T00:00:00`);
+      const year = Number(activity.year);
+      const rawHour = activity.hour;
+      const hourValue = Number(rawHour);
+      const hasHour = rawHour !== null
+        && rawHour !== undefined
+        && Number.isFinite(hourValue)
+        && hourValue >= 0
+        && hourValue <= 23;
+      if (!selectedYearSet.has(year) || Number.isNaN(date.getTime())) {
+        return null;
+      }
+      const dayEntry = aggregateYears?.[String(year)]?.[activity.type]?.[dateStr] || null;
+      const dayEntryCount = Number(dayEntry?.count || 0);
+      const perActivityMetricValue = (metricKey) => {
+        if (dayEntryCount <= 0) return 0;
+        const dayValue = Number(dayEntry?.[metricKey] || 0);
+        return Number.isFinite(dayValue) && dayValue > 0
+          ? dayValue / dayEntryCount
+          : 0;
+      };
+      return {
+        date,
+        type: activity.type,
+        subtype: getActivitySubtypeLabel(activity),
+        year,
+        dayIndex: date.getDay(),
+        monthIndex: date.getMonth(),
+        weekIndex: weekOfYear(date),
+        hour: hasHour ? hourValue : null,
+        distance: perActivityMetricValue("distance"),
+        moving_time: perActivityMetricValue("moving_time"),
+        elevation_gain: perActivityMetricValue("elevation_gain"),
+      };
+    })
+    .filter(Boolean);
+
+  const oldestActivityYear = activities.reduce(
+    (oldest, activity) => Math.min(oldest, activity.year),
+    Number.POSITIVE_INFINITY,
+  );
+  const visibleYearsDesc = Number.isFinite(oldestActivityYear)
+    ? yearsDesc.filter((year) => Number(year) >= oldestActivityYear)
+    : yearsDesc.slice();
+  const yearIndex = new Map();
+  visibleYearsDesc.forEach((year, index) => {
+    yearIndex.set(Number(year), index);
+  });
+
+  const formatBreakdown = (total, breakdown) => formatTooltipBreakdown(total, breakdown, types);
+
+  const dayDisplayLabels = ["Sun", "", "", "Wed", "", "", "Sat"];
+  const monthDisplayLabels = ["Jan", "", "Mar", "", "May", "", "Jul", "", "Sep", "", "Nov", ""];
+
+  const buildZeroedMatrix = (columns) => visibleYearsDesc.map(() => new Array(columns).fill(0));
+  const buildBreakdownMatrix = (columns) => visibleYearsDesc.map(() => (
+    Array.from({ length: columns }, () => createTooltipBreakdown())
+  ));
+
+  const buildFrequencyData = (filterFn, metricKey = null) => {
+    const dayMatrix = buildZeroedMatrix(7);
+    const dayBreakdowns = buildBreakdownMatrix(7);
+    const monthMatrix = buildZeroedMatrix(12);
+    const monthBreakdowns = buildBreakdownMatrix(12);
+    const hourMatrix = buildZeroedMatrix(24);
+    const hourBreakdowns = buildBreakdownMatrix(24);
+    const weekTotals = new Array(54).fill(0);
+    let activityCount = 0;
+    let hourActivityCount = 0;
+
+    activities.forEach((activity) => {
+      if (typeof filterFn === "function" && !filterFn(activity)) {
+        return;
+      }
+      const row = yearIndex.get(activity.year);
+      if (row === undefined) return;
+      const weight = metricKey ? Number(activity[metricKey] || 0) : 1;
+
+      activityCount += 1;
+      dayMatrix[row][activity.dayIndex] += weight;
+      monthMatrix[row][activity.monthIndex] += weight;
+      if (activity.weekIndex >= 1 && activity.weekIndex < weekTotals.length) {
+        weekTotals[activity.weekIndex] += weight;
+      }
+
+      const dayBucket = dayBreakdowns[row][activity.dayIndex];
+      const monthBucket = monthBreakdowns[row][activity.monthIndex];
+      addTooltipBreakdownCount(dayBucket, activity.type, activity.subtype);
+      addTooltipBreakdownCount(monthBucket, activity.type, activity.subtype);
+
+      if (Number.isFinite(activity.hour)) {
+        hourActivityCount += 1;
+        hourMatrix[row][activity.hour] += weight;
+        const hourBucket = hourBreakdowns[row][activity.hour];
+        addTooltipBreakdownCount(hourBucket, activity.type, activity.subtype);
+      }
+    });
+
+    const dayTotals = dayMatrix.reduce(
+      (acc, row) => row.map((value, index) => acc[index] + value),
+      new Array(7).fill(0),
+    );
+    const monthTotals = monthMatrix.reduce(
+      (acc, row) => row.map((value, index) => acc[index] + value),
+      new Array(12).fill(0),
+    );
+    const hourTotals = hourMatrix.reduce(
+      (acc, row) => row.map((value, index) => acc[index] + value),
+      new Array(24).fill(0),
+    );
+
+    return {
+      activityCount,
+      hourActivityCount,
+      dayMatrix,
+      dayBreakdowns,
+      monthMatrix,
+      monthBreakdowns,
+      hourMatrix,
+      hourBreakdowns,
+      weekTotals,
+      dayTotals,
+      monthTotals,
+      hourTotals,
+    };
+  };
+
+  const baseData = buildFrequencyData();
+  const metricTotals = {
+    distance: activities.reduce((sum, activity) => sum + Number(activity.distance || 0), 0),
+    moving_time: activities.reduce((sum, activity) => sum + Number(activity.moving_time || 0), 0),
+    elevation_gain: activities.reduce((sum, activity) => sum + Number(activity.elevation_gain || 0), 0),
+  };
+  const metricItems = FREQUENCY_METRIC_ITEMS.map((item) => ({
+    key: item.key,
+    label: item.label,
+    filterable: Number(metricTotals[item.key] || 0) > 0,
+  }));
+  const metricButtons = new Map();
+  const filterableMetricKeys = getFilterableKeys(metricItems);
+  activeMetricKey = normalizeSingleSelectKey(activeMetricKey, filterableMetricKeys);
+  const reportMetricState = (source) => {
+    if (!onMetricStateChange) return;
+    onMetricStateChange({
+      metricKey: activeMetricKey,
+      filterableMetricKeys: filterableMetricKeys.slice(),
+      source,
+    });
+  };
+  const renderMetricButtonState = () => renderSingleSelectButtonState(
+    metricItems,
+    metricButtons,
+    activeMetricKey,
+  );
+  if (baseData.activityCount <= 0) {
+    if (onFactStateChange) {
+      onFactStateChange({
+        factKey: null,
+        filterableFactKeys: [],
+        source: "init",
+      });
+    }
+    reportMetricState("init");
+    return buildEmptySelectionCard(types, yearsDesc);
+  }
+
+  const dayPanel = buildStatPanel("");
+
+  const monthPanel = buildStatPanel("");
+
+  const hourPanel = buildStatPanel("");
+
+  const bestDayIndex = baseData.dayTotals.reduce((best, value, index) => (
+    value > baseData.dayTotals[best] ? index : best
+  ), 0);
+  const bestDayLabel = `${DAYS[bestDayIndex]} (${baseData.dayTotals[bestDayIndex]})`;
+
+  const bestMonthIndex = baseData.monthTotals.reduce((best, value, index) => (
+    value > baseData.monthTotals[best] ? index : best
+  ), 0);
+  const bestMonthLabel = `${MONTHS[bestMonthIndex]} (${baseData.monthTotals[bestMonthIndex]})`;
+
+  const bestHourIndex = baseData.hourTotals.reduce((best, value, index) => (
+    value > baseData.hourTotals[best] ? index : best
+  ), 0);
+  const bestHourLabel = baseData.hourActivityCount > 0
+    ? `${formatHourLabel(bestHourIndex)} (${baseData.hourTotals[bestHourIndex]})`
+    : "Not enough time data yet";
+
+  const bestWeekIndex = baseData.weekTotals.reduce((best, value, index) => (
+    index === 0 ? best : (value > baseData.weekTotals[best] ? index : best)
+  ), 1);
+  const bestWeekCount = baseData.weekTotals[bestWeekIndex] || 0;
+  const bestWeekLabel = bestWeekCount > 0
+    ? `Week ${bestWeekIndex} (${bestWeekCount})`
+    : "Not enough data yet";
+
+  const graphColumns = [dayPanel.panel, monthPanel.panel, hourPanel.panel];
+
+  graphColumns.forEach((panel) => {
+    const col = document.createElement("div");
+    col.className = "more-stats-col";
+    if (panel === monthPanel.panel) {
+      col.dataset.chipAxisAnchor = "true";
+    }
+    col.appendChild(panel);
+    graphs.appendChild(col);
+  });
+
+  const factItems = [
+    {
+      key: "most-active-day",
+      label: "Most active day",
+      value: bestDayLabel,
+      filter: (activity) => activity.dayIndex === bestDayIndex,
+      filterable: baseData.activityCount > 0,
+    },
+    {
+      key: "most-active-month",
+      label: "Most Active Month",
+      value: bestMonthLabel,
+      filter: (activity) => activity.monthIndex === bestMonthIndex,
+      filterable: baseData.activityCount > 0,
+    },
+    {
+      key: "peak-hour",
+      label: "Peak hour",
+      value: bestHourLabel,
+      filter: (activity) => Number.isFinite(activity.hour) && activity.hour === bestHourIndex,
+      filterable: baseData.hourActivityCount > 0,
+    },
+    {
+      key: "most-active-week",
+      label: "Most active week",
+      value: bestWeekLabel,
+      filter: (activity) => activity.weekIndex === bestWeekIndex,
+      filterable: bestWeekCount > 0,
+    },
+  ];
+
+  const factButtons = new Map();
+  const filterableFactKeys = getFilterableKeys(factItems);
+  activeFactKey = normalizeSingleSelectKey(activeFactKey, filterableFactKeys);
+  const reportFactState = (source) => {
+    if (!onFactStateChange) return;
+    onFactStateChange({
+      factKey: activeFactKey,
+      filterableFactKeys: filterableFactKeys.slice(),
+      source,
+    });
+  };
+  const renderFactButtonState = () => renderSingleSelectButtonState(
+    factItems,
+    factButtons,
+    activeFactKey,
+  );
+
+  const renderFrequencyGraphs = () => {
+    const activeFact = factItems.find((item) => item.key === activeFactKey) || null;
+    const matrixData = buildFrequencyData(activeFact?.filter, activeMetricKey);
+    const metricLabel = activeMetricKey
+      ? FREQUENCY_METRIC_ITEMS.find((item) => item.key === activeMetricKey)?.label || "Metric"
+      : "";
+    const formatTooltipValue = (value) => {
+      if (!activeMetricKey) return "";
+      return `${metricLabel}: ${formatMetricTotal(activeMetricKey, value, units)}`;
+    };
+    const formatMatrixTooltip = (year, label, value, breakdown) => {
+      const lines = [`${year} · ${label}`];
+      if (activeMetricKey) {
+        lines.push(formatTooltipValue(value));
+        const activityTotal = Object.values(breakdown?.typeCounts || {})
+          .reduce((sum, count) => sum + count, 0);
+        lines.push(formatBreakdown(activityTotal, breakdown));
+      } else {
+        lines.push(formatBreakdown(value, breakdown));
+      }
+      return lines.join("\n");
+    };
+
+    dayPanel.body.innerHTML = "";
+    dayPanel.body.appendChild(
+      buildYearMatrix(
+        visibleYearsDesc,
+        dayDisplayLabels,
+        matrixData.dayMatrix,
+        color,
+        {
+          tooltipLabels: DAYS,
+          emptyColor,
+          tooltipFormatter: (year, label, value, row, col) => {
+            const breakdown = matrixData.dayBreakdowns[row][col] || {};
+            return formatMatrixTooltip(year, label, value, breakdown);
+          },
+        },
+      ),
+    );
+
+    monthPanel.body.innerHTML = "";
+    monthPanel.body.appendChild(
+      buildYearMatrix(
+        visibleYearsDesc,
+        monthDisplayLabels,
+        matrixData.monthMatrix,
+        color,
+        {
+          tooltipLabels: MONTHS,
+          emptyColor,
+          tooltipFormatter: (year, label, value, row, col) => {
+            const breakdown = matrixData.monthBreakdowns[row][col] || {};
+            return formatMatrixTooltip(year, label, value, breakdown);
+          },
+        },
+      ),
+    );
+
+    hourPanel.body.innerHTML = "";
+    if (matrixData.hourActivityCount > 0) {
+      const hourLabels = matrixData.hourTotals.map((_, hour) => (hour % 3 === 0 ? formatHourLabel(hour) : ""));
+      const hourTooltipLabels = matrixData.hourTotals.map((_, hour) => `${formatHourLabel(hour)} (${hour}:00)`);
+      hourPanel.body.appendChild(
+        buildYearMatrix(
+          visibleYearsDesc,
+          hourLabels,
+          matrixData.hourMatrix,
+          color,
+          {
+            tooltipLabels: hourTooltipLabels,
+            emptyColor,
+            tooltipFormatter: (year, label, value, row, col) => {
+              const breakdown = matrixData.hourBreakdowns[row][col] || {};
+              return formatMatrixTooltip(year, label, value, breakdown);
+            },
+          },
+        ),
+      );
+      return;
+    }
+
+    const fallback = document.createElement("div");
+    fallback.className = "stat-subtitle";
+    fallback.textContent = "Time-of-day stats require activity timestamps.";
+    hourPanel.body.appendChild(fallback);
+  };
+
+  metricItems.forEach((item) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "more-stats-metric-chip";
+    chip.textContent = item.label;
+    chip.setAttribute("aria-disabled", item.filterable ? "false" : "true");
+    chip.setAttribute("aria-pressed", "false");
+    if (item.filterable) {
+      attachSingleSelectCardToggle(chip, {
+        itemKey: item.key,
+        getActiveKey: () => activeMetricKey,
+        setActiveKey: (nextMetricKey) => {
+          activeMetricKey = nextMetricKey;
+        },
+        onToggleComplete: () => {
+          renderMetricButtonState();
+          renderFrequencyGraphs();
+          reportMetricState("card");
+          schedulePostInteractionAlignment();
+        },
+      });
+    } else {
+      const unavailableReason = getFrequencyMetricUnavailableReason(item.key, item.label);
+      chip.classList.add("is-unavailable");
+      chip.title = unavailableReason;
+      chip.setAttribute("aria-label", `${item.label} unavailable. ${unavailableReason}`);
+      attachTooltip(chip, unavailableReason);
+    }
+    metricButtons.set(item.key, chip);
+    metricChipRow.appendChild(chip);
+  });
+
+  factItems.forEach((item) => {
+    const factCard = buildSideStatCard(item.label, item.value, {
+      tagName: "button",
+      className: "card-stat more-stats-fact-card more-stats-fact-button",
+      extraClasses: item.key ? [`fact-${item.key}`] : [],
+      disabled: !item.filterable,
+      ariaPressed: false,
+    });
+    if (item.filterable) {
+      attachSingleSelectCardToggle(factCard, {
+        itemKey: item.key,
+        getActiveKey: () => activeFactKey,
+        setActiveKey: (nextFactKey) => {
+          activeFactKey = nextFactKey;
+        },
+        onToggleComplete: () => {
+          renderFactButtonState();
+          renderFrequencyGraphs();
+          reportFactState("card");
+          schedulePostInteractionAlignment();
+        },
+      });
+    }
+    factButtons.set(item.key, factCard);
+    factGrid.appendChild(factCard);
+  });
+
+  renderMetricButtonState();
+  renderFactButtonState();
+  renderFrequencyGraphs();
+  reportMetricState("init");
+  reportFactState("init");
+
+  facts.appendChild(metricChipRow);
+  facts.appendChild(factGrid);
+  body.appendChild(graphs);
+  card.appendChild(body);
+  card.appendChild(facts);
+  return card;
+}
+
+function buildYearMatrix(years, colLabels, matrixValues, color, options = {}) {
+  const container = document.createElement("div");
+  container.className = "stat-matrix";
+  if (!years.length || !colLabels.length) {
+    return container;
+  }
+
+  const matrixArea = document.createElement("div");
+  matrixArea.className = "axis-matrix-area";
+  matrixArea.style.gridTemplateColumns = "var(--axis-width) max-content";
+  matrixArea.style.gridTemplateRows = "var(--label-row-height) auto";
+  matrixArea.style.columnGap = "var(--axis-gap)";
+
+  const monthRow = document.createElement("div");
+  monthRow.className = "axis-month-row";
+  monthRow.style.paddingLeft = "var(--grid-pad-left)";
+
+  const dayCol = document.createElement("div");
+  dayCol.className = "axis-day-col";
+  dayCol.style.paddingTop = "var(--grid-pad-top)";
+  dayCol.style.gap = "var(--gap)";
+
+  years.forEach((year) => {
+    const yLabel = document.createElement("div");
+    yLabel.className = "day-label axis-y-label";
+    yLabel.textContent = String(year);
+    yLabel.style.height = "var(--cell)";
+    yLabel.style.lineHeight = "var(--cell)";
+    dayCol.appendChild(yLabel);
+  });
+
+  const grid = document.createElement("div");
+  grid.className = "axis-matrix-grid";
+  grid.style.gridTemplateColumns = `repeat(${colLabels.length}, var(--cell))`;
+  grid.style.gridTemplateRows = `repeat(${years.length}, var(--cell))`;
+  grid.style.gap = "var(--gap)";
+  grid.style.padding = "var(--grid-pad-top) var(--grid-pad-right) var(--grid-pad-bottom) var(--grid-pad-left)";
+
+  const max = matrixValues.reduce(
+    (acc, row) => Math.max(acc, ...row),
+    0,
+  );
+  const tooltipLabels = options.tooltipLabels || colLabels;
+
+  colLabels.forEach((label, colIndex) => {
+    if (!label) return;
+    const xLabel = document.createElement("div");
+    xLabel.className = "month-label axis-x-label";
+    xLabel.textContent = label;
+    xLabel.style.left = `calc(${colIndex} * (var(--cell) + var(--gap)))`;
+    monthRow.appendChild(xLabel);
+  });
+
+  years.forEach((year, row) => {
+    colLabels.forEach((_, col) => {
+      const cell = document.createElement("div");
+      cell.className = "cell axis-matrix-cell";
+      cell.style.gridRow = String(row + 1);
+      cell.style.gridColumn = String(col + 1);
+      const value = matrixValues[row]?.[col] || 0;
+      if (options.emptyColor && value <= 0) {
+        cell.style.background = options.emptyColor;
+      } else {
+        cell.style.background = heatColor(color, value, max);
+      }
+      if (options.tooltipFormatter) {
+        const label = tooltipLabels[col];
+        const tooltipText = options.tooltipFormatter(year, label, value, row, col);
+        attachTooltip(cell, tooltipText);
+      }
+      grid.appendChild(cell);
+    });
+  });
+
+  matrixArea.appendChild(monthRow);
+  matrixArea.appendChild(dayCol);
+  matrixArea.appendChild(grid);
+  container.appendChild(matrixArea);
+  return container;
+}
+
+function renderLoadError(error) {
+  const detail = error && typeof error.message === "string" && error.message
+    ? error.message
+    : "Unexpected error.";
+
+  if (updated) {
+    updated.textContent = "Last updated: unavailable";
+  }
+  if (summary) {
+    summary.innerHTML = "";
+  }
+  if (!heatmaps) {
+    return;
+  }
+
+  heatmaps.innerHTML = "";
+  const card = document.createElement("div");
+  card.className = "card";
+
+  const title = document.createElement("div");
+  title.className = "card-title";
+  title.textContent = "Dashboard unavailable";
+
+  const body = document.createElement("div");
+  body.className = "stat-subtitle";
+  body.textContent = `Could not load dashboard data. ${detail}`;
+
+  card.appendChild(title);
+  card.appendChild(body);
+  heatmaps.appendChild(card);
+}
+
+async function init() {
+  syncRepoLink();
+  const resp = await fetch("data.json");
+  if (!resp.ok) {
+    throw new Error(`Failed to load data.json (${resp.status})`);
+  }
+  const payload = await resp.json();
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Invalid dashboard data format.");
+  }
+  TYPE_META = payload.type_meta || {};
+  OTHER_BUCKET = String(payload.other_bucket || "OtherSports");
+  (payload.types || []).forEach((type) => {
+    if (!TYPE_META[type]) {
+      TYPE_META[type] = { label: prettifyType(type), accent: fallbackColor(type) };
+    }
+  });
+
+  if (payload.generated_at) {
+    const updatedAt = new Date(payload.generated_at);
+    if (!Number.isNaN(updatedAt.getTime())) {
+      updated.textContent = `Last updated: ${updatedAt.toLocaleString([], {
+        year: "numeric",
+        month: "numeric",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })}`;
+    }
+  }
+
+  const typeOptions = [
+    { value: "all", label: "All Activities" },
+    ...payload.types.map((type) => ({ value: type, label: displayType(type) })),
+  ];
+
+  function renderButtons(container, options, onSelect) {
+    if (!container) return;
+    container.innerHTML = "";
+    options.forEach((option) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "filter-button";
+      button.dataset.value = option.value;
+      button.textContent = option.label;
+      button.addEventListener("click", () => onSelect(option.value));
+      container.appendChild(button);
+    });
+  }
+
+  function renderMenuOptions(container, options, selectedValues, isAllSelected, onSelect, normalizeValue) {
+    if (!container) return;
+    container.innerHTML = "";
+    options.forEach((option) => {
+      const rawValue = String(option.value);
+      const normalized = normalizeValue ? normalizeValue(rawValue) : rawValue;
+      const isActive = rawValue === "all"
+        ? isAllSelected
+        : (!isAllSelected && selectedValues.has(normalized));
+      const isChecked = isAllSelected || isActive;
+
+      const row = document.createElement("div");
+      row.className = "filter-menu-option";
+      row.setAttribute("role", "button");
+      if (isActive) {
+        row.classList.add("active");
+      }
+      row.dataset.value = rawValue;
+
+      const label = document.createElement("span");
+      label.className = "filter-menu-option-label";
+      label.textContent = option.label;
+
+      const check = document.createElement("input");
+      check.type = "checkbox";
+      check.className = "filter-menu-check";
+      check.checked = isChecked;
+      check.tabIndex = -1;
+      check.setAttribute("aria-hidden", "true");
+
+      row.appendChild(label);
+      row.appendChild(check);
+      row.addEventListener("pointerdown", (event) => {
+        event.stopPropagation();
+      });
+      row.addEventListener("click", () => onSelect(rawValue));
+      container.appendChild(row);
+    });
+  }
+
+  function renderMenuDoneButton(container, onDone) {
+    if (!container) return;
+    const done = document.createElement("button");
+    done.type = "button";
+    done.className = "filter-menu-done";
+    done.textContent = "Done";
+    done.addEventListener("pointerdown", (event) => {
+      event.stopPropagation();
+    });
+    done.addEventListener("click", () => onDone());
+    container.appendChild(done);
+  }
+
+  let resizeTimer = null;
+  let lastViewportWidth = window.innerWidth;
+  let lastIsNarrowLayout = isNarrowLayoutViewport();
+
+  let allTypesMode = true;
+  let selectedTypes = new Set();
+  let allYearsMode = true;
+  let selectedYears = new Set();
+  let currentVisibleYears = payload.years.slice().sort((a, b) => b - a);
+  let hoverClearedSummaryType = null;
+  let hoverClearedSummaryYearMetricKey = null;
+  const selectedYearMetricByYear = new Map();
+  let visibleYearMetricYears = new Set();
+  let filterableYearMetricsByYear = new Map();
+  let selectedFrequencyFactKey = null;
+  let visibleFrequencyFilterableFactKeys = new Set();
+  let selectedFrequencyMetricKey = null;
+  let visibleFrequencyFilterableMetricKeys = new Set();
+  let draftTypeMenuSelection = null;
+  let draftYearMenuSelection = null;
+
+  function reduceTopButtonSelection({
+    rawValue,
+    allMode,
+    selectedValues,
+    allValues,
+    normalizeValue = (value) => value,
+  }) {
+    if (rawValue === "all") {
+      return { allMode: true, selectedValues: new Set() };
+    }
+    const normalizedValue = normalizeValue(rawValue);
+    if (!allValues.includes(normalizedValue)) {
+      return { allMode, selectedValues };
+    }
+    if (allMode) {
+      return {
+        allMode: false,
+        selectedValues: new Set([normalizedValue]),
+      };
+    }
+    const nextSelectedValues = new Set(selectedValues);
+    if (nextSelectedValues.has(normalizedValue)) {
+      nextSelectedValues.delete(normalizedValue);
+      if (!nextSelectedValues.size) {
+        return { allMode: true, selectedValues: new Set() };
+      }
+      return { allMode: false, selectedValues: nextSelectedValues };
+    }
+    nextSelectedValues.add(normalizedValue);
+    return { allMode: false, selectedValues: nextSelectedValues };
+  }
+
+  function reduceMenuSelection({
+    rawValue,
+    allMode,
+    selectedValues,
+    allValues,
+    normalizeValue = (value) => value,
+    allowMobileToggleOffAll = false,
+    isMobileLayout = false,
+  }) {
+    if (rawValue === "all") {
+      if (allowMobileToggleOffAll && isMobileLayout && allMode) {
+        return { allMode: false, selectedValues: new Set() };
+      }
+      return { allMode: true, selectedValues: new Set() };
+    }
+    const normalizedValue = normalizeValue(rawValue);
+    if (!allValues.includes(normalizedValue)) {
+      return { allMode, selectedValues };
+    }
+    if (allMode) {
+      return {
+        allMode: false,
+        selectedValues: new Set(allValues.filter((value) => value !== normalizedValue)),
+      };
+    }
+    const nextSelectedValues = new Set(selectedValues);
+    if (nextSelectedValues.has(normalizedValue)) {
+      nextSelectedValues.delete(normalizedValue);
+      return { allMode: false, selectedValues: nextSelectedValues };
+    }
+    nextSelectedValues.add(normalizedValue);
+    return { allMode: false, selectedValues: nextSelectedValues };
+  }
+
+  function deriveActiveSummaryYearMetricKey({
+    visibleYears,
+    selectedMetricByYear,
+    filterableMetricsByYear,
+  }) {
+    const selectedMetrics = new Set();
+    for (const year of visibleYears) {
+      const selectedMetric = selectedMetricByYear.get(year);
+      const filterableSet = filterableMetricsByYear.get(year) || new Set();
+      if (selectedMetric && filterableSet.has(selectedMetric)) {
+        selectedMetrics.add(selectedMetric);
+      }
+    }
+    if (selectedMetrics.size !== 1) {
+      return null;
+    }
+    const [candidateMetric] = Array.from(selectedMetrics);
+    let hasEligibleYear = false;
+    for (const year of visibleYears) {
+      const filterableSet = filterableMetricsByYear.get(year) || new Set();
+      if (!filterableSet.has(candidateMetric)) continue;
+      hasEligibleYear = true;
+      if (selectedMetricByYear.get(year) !== candidateMetric) {
+        return null;
+      }
+    }
+    return hasEligibleYear ? candidateMetric : null;
+  }
+
+  function toStringSet(values) {
+    const result = new Set();
+    (Array.isArray(values) ? values : []).forEach((value) => {
+      if (typeof value === "string") {
+        result.add(value);
+      }
+    });
+    return result;
+  }
+
+  function trackYearMetricAvailability(year, hasData, visibleYearsSet, filterableMetricsByYearMap) {
+    if (hasData) {
+      visibleYearsSet.add(year);
+      return;
+    }
+    filterableMetricsByYearMap.set(Number(year), new Set());
+  }
+
+  function pruneYearMetricSelectionsByFilterability(selectionByYear, filterableMetricsByYearMap) {
+    filterableMetricsByYearMap.forEach((filterableSet, year) => {
+      const selectedMetricKey = selectionByYear.get(year) || null;
+      if (selectedMetricKey && !filterableSet.has(selectedMetricKey)) {
+        selectionByYear.delete(year);
+      }
+    });
+  }
+
+  function hasAnyYearMetricSelection() {
+    for (const metricKey of selectedYearMetricByYear.values()) {
+      if (metricKey) return true;
+    }
+    return false;
+  }
+
+  function hasAnyFrequencyMetricSelection() {
+    return Boolean(selectedFrequencyMetricKey);
+  }
+
+  function isDefaultFilterState() {
+    return areAllTypesSelected()
+      && areAllYearsSelected()
+      && !hasAnyYearMetricSelection()
+      && !selectedFrequencyFactKey
+      && !hasAnyFrequencyMetricSelection();
+  }
+
+  function syncResetAllButtonState() {
+    if (!resetAllButton) return;
+    resetAllButton.disabled = isDefaultFilterState();
+  }
+
+  function setYearMetricSelection(year, metricKey) {
+    const normalizedYear = Number(year);
+    if (!Number.isFinite(normalizedYear)) return;
+    if (typeof metricKey === "string" && metricKey) {
+      selectedYearMetricByYear.set(normalizedYear, metricKey);
+      return;
+    }
+    selectedYearMetricByYear.delete(normalizedYear);
+  }
+
+  function getActiveSummaryYearMetricKey() {
+    return deriveActiveSummaryYearMetricKey({
+      visibleYears: visibleYearMetricYears,
+      selectedMetricByYear: selectedYearMetricByYear,
+      filterableMetricsByYear: filterableYearMetricsByYear,
+    });
+  }
+
+  function getActiveSummaryMetricDisplayKey() {
+    const yearSummaryMetricKey = getActiveSummaryYearMetricKey();
+    if (!yearSummaryMetricKey) return null;
+    return selectedFrequencyMetricKey === yearSummaryMetricKey
+      ? yearSummaryMetricKey
+      : null;
+  }
+
+  function syncSummaryYearMetricButtons() {
+    if (!summary) return;
+    const buttons = Array.from(summary.querySelectorAll(".summary-year-metric-card"));
+    if (!buttons.length) return;
+    const activeSummaryYearMetricKey = getActiveSummaryMetricDisplayKey();
+    if (activeSummaryYearMetricKey && hoverClearedSummaryYearMetricKey === activeSummaryYearMetricKey) {
+      hoverClearedSummaryYearMetricKey = null;
+    }
+    buttons.forEach((button) => {
+      const metricKey = String(button.dataset.metricKey || "");
+      const active = metricKey === activeSummaryYearMetricKey;
+      button.classList.toggle("active", active);
+      if (active) {
+        button.classList.remove("summary-glow-cleared");
+      } else {
+        button.classList.toggle("summary-glow-cleared", hoverClearedSummaryYearMetricKey === metricKey);
+      }
+      button.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+  }
+
+  function areAllTypesSelected() {
+    return allTypesMode;
+  }
+
+  function areAllYearsSelected() {
+    return allYearsMode;
+  }
+
+  function cloneSelectionState(allMode, selectedValues) {
+    return {
+      allMode: Boolean(allMode),
+      selectedValues: new Set(selectedValues),
+    };
+  }
+
+  function selectedTypesListForState(state) {
+    if (!state || state.allMode) {
+      return payload.types.slice();
+    }
+    return payload.types.filter((type) => state.selectedValues.has(type));
+  }
+
+  function selectedTypesList() {
+    if (areAllTypesSelected()) {
+      return payload.types.slice();
+    }
+    return payload.types.filter((type) => selectedTypes.has(type));
+  }
+
+  function selectedYearsListForState(state, visibleYears) {
+    if (!state || state.allMode) {
+      return visibleYears.slice();
+    }
+    return visibleYears.filter((year) => state.selectedValues.has(Number(year)));
+  }
+
+  function selectedYearsList(visibleYears) {
+    if (areAllYearsSelected()) {
+      return visibleYears.slice();
+    }
+    return visibleYears.filter((year) => selectedYears.has(Number(year)));
+  }
+
+  function updateButtonState(container, selectedValues, isAllSelected, normalizeValue) {
+    if (!container) return;
+    container.querySelectorAll(".filter-button").forEach((button) => {
+      const rawValue = String(button.dataset.value || "");
+      const value = normalizeValue ? normalizeValue(rawValue) : rawValue;
+      const isActive = rawValue === "all"
+        ? isAllSelected
+        : (!isAllSelected && selectedValues.has(value));
+      button.classList.toggle("active", isActive);
+    });
+  }
+
+  function toggleType(value) {
+    const nextState = reduceTopButtonSelection({
+      rawValue: value,
+      allMode: allTypesMode,
+      selectedValues: selectedTypes,
+      allValues: payload.types,
+    });
+    allTypesMode = nextState.allMode;
+    selectedTypes = nextState.selectedValues;
+  }
+
+  function toggleTypeMenu(value) {
+    const selection = draftTypeMenuSelection || cloneSelectionState(allTypesMode, selectedTypes);
+    const nextState = reduceMenuSelection({
+      rawValue: value,
+      allMode: selection.allMode,
+      selectedValues: selection.selectedValues,
+      allValues: payload.types,
+      allowMobileToggleOffAll: true,
+      isMobileLayout: isNarrowLayoutViewport(),
+    });
+    draftTypeMenuSelection = nextState;
+  }
+
+  function toggleTypeFromSummaryCard(type) {
+    toggleType(type);
+  }
+
+  function toggleYear(value) {
+    const nextState = reduceTopButtonSelection({
+      rawValue: value,
+      allMode: allYearsMode,
+      selectedValues: selectedYears,
+      allValues: currentVisibleYears,
+      normalizeValue: (rawValue) => Number(rawValue),
+    });
+    allYearsMode = nextState.allMode;
+    selectedYears = nextState.selectedValues;
+  }
+
+  function toggleYearMenu(value) {
+    const selection = draftYearMenuSelection || cloneSelectionState(allYearsMode, selectedYears);
+    const nextState = reduceMenuSelection({
+      rawValue: value,
+      allMode: selection.allMode,
+      selectedValues: selection.selectedValues,
+      allValues: currentVisibleYears,
+      normalizeValue: (rawValue) => Number(rawValue),
+      allowMobileToggleOffAll: true,
+      isMobileLayout: isNarrowLayoutViewport(),
+    });
+    draftYearMenuSelection = nextState;
+  }
+
+  function commitTypeMenuSelection() {
+    if (!draftTypeMenuSelection) return;
+    allTypesMode = draftTypeMenuSelection.allMode;
+    selectedTypes = new Set(draftTypeMenuSelection.selectedValues);
+    draftTypeMenuSelection = null;
+  }
+
+  function commitYearMenuSelection() {
+    if (!draftYearMenuSelection) return;
+    allYearsMode = draftYearMenuSelection.allMode;
+    selectedYears = new Set(draftYearMenuSelection.selectedValues);
+    draftYearMenuSelection = null;
+  }
+
+  function finalizeTypeSelection() {
+    if (!areAllTypesSelected() && selectedTypes.size === payload.types.length) {
+      allTypesMode = true;
+      selectedTypes.clear();
+    }
+  }
+
+  function finalizeYearSelection() {
+    if (!areAllYearsSelected() && selectedYears.size === currentVisibleYears.length) {
+      allYearsMode = true;
+      selectedYears.clear();
+    }
+  }
+
+  function getTypeMenuText(types, allTypesSelected) {
+    if (allTypesSelected) return "All Activities";
+    if (types.length) return types.map((type) => displayType(type)).join(", ");
+    return "No Activities Selected";
+  }
+
+  function getYearMenuText(years, allYearsSelected) {
+    if (allYearsSelected) return "All Years";
+    if (years.length) return years.map((year) => String(year)).join(", ");
+    return "No Years Selected";
+  }
+
+  function setMenuLabel(labelEl, text, fallbackText) {
+    if (!labelEl) return;
+    labelEl.textContent = text;
+    if (!fallbackText || fallbackText === text) return;
+    if (!isNarrowLayoutViewport()) return;
+    const menuButton = labelEl.closest(".filter-menu-button");
+    if (!menuButton || menuButton.offsetParent === null) return;
+    if (labelEl.scrollWidth > labelEl.clientWidth) {
+      labelEl.textContent = fallbackText;
+    }
+  }
+
+  function setMenuOpen(menuEl, buttonEl, isOpen) {
+    if (!menuEl) return;
+    menuEl.classList.toggle("open", isOpen);
+    if (buttonEl) {
+      buttonEl.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    }
+  }
+
+  function setCardScrollKey(card, key) {
+    if (!card || !card.dataset) return;
+    card.dataset.scrollKey = String(key || "");
+  }
+
+  function update(options = {}) {
+    const keepTypeMenuOpen = Boolean(options.keepTypeMenuOpen);
+    const keepYearMenuOpen = Boolean(options.keepYearMenuOpen);
+    const menuOnly = Boolean(options.menuOnly);
+    const resetCardScroll = Boolean(options.resetCardScroll);
+    const resetViewport = Boolean(options.resetViewport);
+    const allTypesSelected = areAllTypesSelected();
+    const types = selectedTypesList();
+    const visibleYears = getVisibleYears(payload.years);
+    currentVisibleYears = visibleYears.slice();
+    if (!areAllYearsSelected()) {
+      const visibleSet = new Set(visibleYears.map(Number));
+      Array.from(selectedYears).forEach((year) => {
+        if (!visibleSet.has(Number(year))) {
+          selectedYears.delete(year);
+        }
+      });
+    }
+    const allYearsSelected = areAllYearsSelected();
+    const yearOptions = [
+      { value: "all", label: "All Years" },
+      ...visibleYears.map((year) => ({ value: String(year), label: String(year) })),
+    ];
+    const typeMenuSelection = draftTypeMenuSelection || { allMode: allTypesMode, selectedValues: selectedTypes };
+    const yearMenuSelection = draftYearMenuSelection || { allMode: allYearsMode, selectedValues: selectedYears };
+    const typeMenuTypes = selectedTypesListForState(typeMenuSelection);
+    const yearMenuYears = selectedYearsListForState(yearMenuSelection, visibleYears);
+    yearMenuYears.sort((a, b) => b - a);
+
+    renderButtons(yearButtons, yearOptions, (value) => {
+      draftYearMenuSelection = null;
+      setMenuOpen(yearMenu, yearMenuButton, false);
+      toggleYear(value);
+      update();
+    });
+    renderMenuOptions(
+      typeMenuOptions,
+      typeOptions,
+      typeMenuSelection.selectedValues,
+      typeMenuSelection.allMode,
+      (value) => {
+        toggleTypeMenu(value);
+        update({ keepTypeMenuOpen: true, menuOnly: true });
+      },
+    );
+    renderMenuDoneButton(typeMenuOptions, () => {
+      commitTypeMenuSelection();
+      finalizeTypeSelection();
+      setMenuOpen(typeMenu, typeMenuButton, false);
+      update();
+    });
+    renderMenuOptions(
+      yearMenuOptions,
+      yearOptions,
+      yearMenuSelection.selectedValues,
+      yearMenuSelection.allMode,
+      (value) => {
+        toggleYearMenu(value);
+        update({ keepYearMenuOpen: true, menuOnly: true });
+      },
+      (v) => Number(v),
+    );
+    renderMenuDoneButton(yearMenuOptions, () => {
+      commitYearMenuSelection();
+      finalizeYearSelection();
+      setMenuOpen(yearMenu, yearMenuButton, false);
+      update();
+    });
+
+    if (menuOnly) {
+      updateButtonState(typeButtons, selectedTypes, allTypesSelected);
+      updateButtonState(yearButtons, selectedYears, allYearsSelected, (v) => Number(v));
+      const typeMenuText = getTypeMenuText(
+        typeMenuTypes,
+        typeMenuSelection.allMode || typeMenuTypes.length === payload.types.length,
+      );
+      const yearMenuText = getYearMenuText(yearMenuYears, yearMenuSelection.allMode);
+      setMenuLabel(
+        typeMenuLabel,
+        typeMenuText,
+        !typeMenuSelection.allMode && typeMenuTypes.length > 1 ? "Multiple Activities Selected" : "",
+      );
+      setMenuLabel(
+        yearMenuLabel,
+        yearMenuText,
+        !yearMenuSelection.allMode && yearMenuYears.length > 1 ? "Multiple Years Selected" : "",
+      );
+      if (typeClearButton) {
+        typeClearButton.disabled = areAllTypesSelected();
+      }
+      if (yearClearButton) {
+        yearClearButton.disabled = areAllYearsSelected();
+      }
+      if (keepTypeMenuOpen) {
+        setMenuOpen(typeMenu, typeMenuButton, true);
+      }
+      if (keepYearMenuOpen) {
+        setMenuOpen(yearMenu, yearMenuButton, true);
+      }
+      return;
+    }
+
+    const years = selectedYearsList(visibleYears);
+    years.sort((a, b) => b - a);
+    const previousSummaryYearMetricKey = getActiveSummaryYearMetricKey();
+    const initialFrequencyMetricKey = selectedFrequencyMetricKey;
+    const getInitialYearMetricKey = (year) => {
+      const storedMetricKey = selectedYearMetricByYear.get(Number(year));
+      if (typeof storedMetricKey === "string" && storedMetricKey) {
+        return storedMetricKey;
+      }
+      return typeof previousSummaryYearMetricKey === "string" && previousSummaryYearMetricKey
+        ? previousSummaryYearMetricKey
+        : null;
+    };
+    const frequencyCardColor = getActivityFrequencyCardColor(types);
+    const showCombinedTypes = types.length > 1;
+    const allAvailableTypesSelected = types.length === payload.types.length;
+    const activeSummaryTypeCards = allTypesSelected ? new Set() : new Set(types);
+    const nextVisibleYearMetricYears = new Set();
+    const nextFilterableYearMetricsByYear = new Map();
+    const nextVisibleFrequencyFilterableFactKeys = new Set();
+    const nextVisibleFrequencyFilterableMetricKeys = new Set();
+    const onYearMetricStateChange = ({ year, metricKey, filterableMetricKeys, source }) => {
+      const normalizedYear = Number(year);
+      if (!Number.isFinite(normalizedYear)) return;
+      const filterableSet = toStringSet(filterableMetricKeys);
+      nextFilterableYearMetricsByYear.set(normalizedYear, filterableSet);
+      const normalizedMetricKey = typeof metricKey === "string" && filterableSet.has(metricKey)
+        ? metricKey
+        : null;
+      setYearMetricSelection(normalizedYear, normalizedMetricKey);
+      if (source === "card") {
+        syncSummaryYearMetricButtons();
+        syncResetAllButtonState();
+      }
+    };
+    const onFrequencyFactStateChange = ({ factKey, filterableFactKeys }) => {
+      nextVisibleFrequencyFilterableFactKeys.clear();
+      toStringSet(filterableFactKeys).forEach((key) => {
+        nextVisibleFrequencyFilterableFactKeys.add(key);
+      });
+      selectedFrequencyFactKey = typeof factKey === "string" && nextVisibleFrequencyFilterableFactKeys.has(factKey)
+        ? factKey
+        : null;
+      syncResetAllButtonState();
+    };
+    const onFrequencyMetricStateChange = ({ metricKey, filterableMetricKeys, source }) => {
+      nextVisibleFrequencyFilterableMetricKeys.clear();
+      toStringSet(filterableMetricKeys).forEach((key) => {
+        nextVisibleFrequencyFilterableMetricKeys.add(key);
+      });
+      const normalizedMetricKey = typeof metricKey === "string" && nextVisibleFrequencyFilterableMetricKeys.has(metricKey)
+        ? metricKey
+        : null;
+      if (source === "card") {
+        selectedFrequencyMetricKey = normalizedMetricKey;
+        syncSummaryYearMetricButtons();
+      }
+      syncResetAllButtonState();
+    };
+
+    updateButtonState(typeButtons, selectedTypes, allTypesSelected);
+    updateButtonState(yearButtons, selectedYears, allYearsSelected, (v) => Number(v));
+    const typeMenuText = getTypeMenuText(
+      typeMenuTypes,
+      typeMenuSelection.allMode || typeMenuTypes.length === payload.types.length,
+    );
+    const yearMenuText = getYearMenuText(yearMenuYears, yearMenuSelection.allMode);
+    setMenuLabel(
+      typeMenuLabel,
+      typeMenuText,
+      !typeMenuSelection.allMode && typeMenuTypes.length > 1 ? "Multiple Activities Selected" : "",
+    );
+    setMenuLabel(
+      yearMenuLabel,
+      yearMenuText,
+      !yearMenuSelection.allMode && yearMenuYears.length > 1 ? "Multiple Years Selected" : "",
+    );
+    if (typeClearButton) {
+      typeClearButton.disabled = areAllTypesSelected();
+    }
+    if (yearClearButton) {
+      yearClearButton.disabled = areAllYearsSelected();
+    }
+    if (keepTypeMenuOpen) {
+      setMenuOpen(typeMenu, typeMenuButton, true);
+    }
+    if (keepYearMenuOpen) {
+      setMenuOpen(yearMenu, yearMenuButton, true);
+    }
+
+    const previousCardScrollOffsets = resetCardScroll
+      ? new Map()
+      : captureCardScrollOffsets(heatmaps);
+
+    if (heatmaps) {
+      heatmaps.innerHTML = "";
+      const showMoreStats = true;
+      if (showCombinedTypes) {
+        const section = document.createElement("div");
+        section.className = "type-section";
+        const header = document.createElement("div");
+        header.className = "type-header";
+        header.textContent = allAvailableTypesSelected ? "All Activities" : formatActivitiesTitle(types);
+        section.appendChild(header);
+        const list = document.createElement("div");
+        list.className = "type-list";
+        const yearTotals = getTypesYearTotals(payload, types, years);
+        const cardYears = years.slice();
+        const { typeLabelsByDate, typeBreakdownsByDate } = buildCombinedTypeDetailsByDate(payload, types, cardYears);
+        const emptyLabel = types.map((type) => displayType(type)).join(" + ");
+        const combinedSelectionKey = `combined:${types.join("|")}`;
+        if (showMoreStats) {
+          const frequencyCard = buildStatsOverview(payload, types, cardYears, frequencyCardColor, {
+            initialFactKey: selectedFrequencyFactKey,
+            initialMetricKey: initialFrequencyMetricKey,
+            onFactStateChange: onFrequencyFactStateChange,
+            onMetricStateChange: onFrequencyMetricStateChange,
+          });
+          setCardScrollKey(frequencyCard, `${combinedSelectionKey}:frequency`);
+          list.appendChild(
+            buildLabeledCardRow(
+              "Activity Frequency",
+              frequencyCard,
+              "frequency",
+            ),
+          );
+        }
+        cardYears.forEach((year) => {
+          const yearData = payload.aggregates?.[String(year)] || {};
+          const aggregates = combineYearAggregates(yearData, types);
+          const total = yearTotals.get(year) || 0;
+          const colorForEntry = (entry) => {
+            if (!entry.types || entry.types.length === 0) {
+              return {
+                background: DEFAULT_COLORS[0],
+                backgroundImage: "",
+              };
+            }
+            if (entry.types.length === 1) {
+              return {
+                background: getColors(entry.types[0])[4],
+                backgroundImage: "",
+              };
+            }
+            return {
+              background: getColors(entry.types[0])[4] || MULTI_TYPE_COLOR,
+              backgroundImage: buildMultiTypeBackgroundImage(entry.types),
+            };
+          };
+          const card = total > 0
+            ? buildCard(
+              "all",
+              year,
+              aggregates,
+              payload.units || { distance: "mi", elevation: "ft" },
+              {
+                colorForEntry,
+                metricHeatmapColor: frequencyCardColor,
+                cardMetricYear: year,
+                initialMetricKey: getInitialYearMetricKey(year),
+                onYearMetricStateChange,
+                selectedTypes: types,
+                typeBreakdownsByDate,
+                typeLabelsByDate,
+              },
+            )
+            : buildEmptyYearCard("all", year, emptyLabel);
+          setCardScrollKey(card, `${combinedSelectionKey}:year:${year}`);
+          trackYearMetricAvailability(
+            year,
+            total > 0,
+            nextVisibleYearMetricYears,
+            nextFilterableYearMetricsByYear,
+          );
+          list.appendChild(buildLabeledCardRow(String(year), card, "year"));
+        });
+        section.appendChild(list);
+        heatmaps.appendChild(section);
+      } else {
+        types.forEach((type) => {
+          const section = document.createElement("div");
+          section.className = "type-section";
+          const header = document.createElement("div");
+          header.className = "type-header";
+          header.textContent = formatActivitiesTitle([type]);
+          section.appendChild(header);
+
+          const list = document.createElement("div");
+          list.className = "type-list";
+          const yearTotals = getTypeYearTotals(payload, type, years);
+          const cardYears = years.slice();
+          const typeCardKey = `type:${type}`;
+          if (showMoreStats) {
+            const frequencyCard = buildStatsOverview(payload, [type], cardYears, frequencyCardColor, {
+              initialFactKey: selectedFrequencyFactKey,
+              initialMetricKey: initialFrequencyMetricKey,
+              onFactStateChange: onFrequencyFactStateChange,
+              onMetricStateChange: onFrequencyMetricStateChange,
+            });
+            setCardScrollKey(frequencyCard, `${typeCardKey}:frequency`);
+            list.appendChild(
+              buildLabeledCardRow(
+                "Activity Frequency",
+                frequencyCard,
+                "frequency",
+              ),
+            );
+          }
+          cardYears.forEach((year) => {
+            const aggregates = payload.aggregates?.[String(year)]?.[type] || {};
+            const total = yearTotals.get(year) || 0;
+            const card = total > 0
+              ? buildCard(type, year, aggregates, payload.units || { distance: "mi", elevation: "ft" }, {
+                metricHeatmapColor: getColors(type)[4],
+                cardMetricYear: year,
+                initialMetricKey: getInitialYearMetricKey(year),
+                onYearMetricStateChange,
+              })
+              : buildEmptyYearCard(type, year);
+            setCardScrollKey(card, `${typeCardKey}:year:${year}`);
+            trackYearMetricAvailability(
+              year,
+              total > 0,
+              nextVisibleYearMetricYears,
+              nextFilterableYearMetricsByYear,
+            );
+            list.appendChild(buildLabeledCardRow(String(year), card, "year"));
+          });
+          if (!list.childElementCount) {
+            return;
+          }
+          section.appendChild(list);
+          heatmaps.appendChild(section);
+        });
+      }
+    }
+    filterableYearMetricsByYear = nextFilterableYearMetricsByYear;
+    visibleYearMetricYears = nextVisibleYearMetricYears;
+    visibleFrequencyFilterableFactKeys = nextVisibleFrequencyFilterableFactKeys;
+    visibleFrequencyFilterableMetricKeys = nextVisibleFrequencyFilterableMetricKeys;
+    if (!visibleFrequencyFilterableFactKeys.has(selectedFrequencyFactKey)) {
+      selectedFrequencyFactKey = null;
+    }
+    if (!visibleFrequencyFilterableMetricKeys.has(selectedFrequencyMetricKey)) {
+      selectedFrequencyMetricKey = null;
+    }
+    pruneYearMetricSelectionsByFilterability(selectedYearMetricByYear, filterableYearMetricsByYear);
+
+    const activeSummaryYearMetricKey = getActiveSummaryMetricDisplayKey();
+    if (activeSummaryYearMetricKey && hoverClearedSummaryYearMetricKey === activeSummaryYearMetricKey) {
+      hoverClearedSummaryYearMetricKey = null;
+    }
+    syncResetAllButtonState();
+
+    const showTypeBreakdown = payload.types.length > 0;
+    const showActiveDays = Boolean(heatmaps);
+    buildSummary(
+      payload,
+      types,
+      years,
+      showTypeBreakdown,
+      showActiveDays,
+      payload.types,
+      activeSummaryTypeCards,
+      hoverClearedSummaryType,
+      (type, wasActiveTypeCard) => {
+        hoverClearedSummaryType = wasActiveTypeCard ? type : null;
+        toggleTypeFromSummaryCard(type);
+        update();
+      },
+      (type) => {
+        if (hoverClearedSummaryType === type) {
+          hoverClearedSummaryType = null;
+        }
+      },
+      activeSummaryYearMetricKey,
+      hoverClearedSummaryYearMetricKey,
+      (metricKey, wasActiveMetricCard) => {
+        hoverClearedSummaryYearMetricKey = wasActiveMetricCard ? metricKey : null;
+        selectedFrequencyFactKey = null;
+        if (wasActiveMetricCard) {
+          visibleYearMetricYears.forEach((year) => {
+            setYearMetricSelection(year, null);
+          });
+          selectedFrequencyMetricKey = null;
+        } else {
+          hoverClearedSummaryYearMetricKey = null;
+          visibleYearMetricYears.forEach((year) => {
+            const filterableSet = filterableYearMetricsByYear.get(year) || new Set();
+            setYearMetricSelection(year, filterableSet.has(metricKey) ? metricKey : null);
+          });
+          selectedFrequencyMetricKey = visibleFrequencyFilterableMetricKeys.has(metricKey)
+            ? metricKey
+            : null;
+        }
+        update();
+      },
+      (metricKey) => {
+        if (hoverClearedSummaryYearMetricKey === metricKey) {
+          hoverClearedSummaryYearMetricKey = null;
+        }
+      },
+    );
+    requestLayoutAlignment();
+    if (previousCardScrollOffsets.size) {
+      window.requestAnimationFrame(() => {
+        restoreCardScrollOffsets(heatmaps, previousCardScrollOffsets);
+      });
+    }
+    if (resetViewport && isNarrowLayoutViewport()) {
+      window.requestAnimationFrame(() => {
+        window.scrollTo({
+          top: 0,
+          left: 0,
+          behavior: "auto",
+        });
+      });
+    }
+  }
+
+  renderButtons(typeButtons, typeOptions, (value) => {
+    draftTypeMenuSelection = null;
+    setMenuOpen(typeMenu, typeMenuButton, false);
+    toggleType(value);
+    update();
+  });
+  if (typeMenuButton) {
+    typeMenuButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const open = !typeMenu?.classList.contains("open");
+      if (open) {
+        draftTypeMenuSelection = cloneSelectionState(allTypesMode, selectedTypes);
+      } else {
+        draftTypeMenuSelection = null;
+      }
+      draftYearMenuSelection = null;
+      setMenuOpen(typeMenu, typeMenuButton, open);
+      setMenuOpen(yearMenu, yearMenuButton, false);
+      update({ keepTypeMenuOpen: open, menuOnly: true });
+    });
+  }
+  if (yearMenuButton) {
+    yearMenuButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const open = !yearMenu?.classList.contains("open");
+      if (open) {
+        draftYearMenuSelection = cloneSelectionState(allYearsMode, selectedYears);
+      } else {
+        draftYearMenuSelection = null;
+      }
+      draftTypeMenuSelection = null;
+      setMenuOpen(yearMenu, yearMenuButton, open);
+      setMenuOpen(typeMenu, typeMenuButton, false);
+      update({ keepYearMenuOpen: open, menuOnly: true });
+    });
+  }
+  if (typeClearButton) {
+    typeClearButton.addEventListener("click", () => {
+      if (areAllTypesSelected()) return;
+      draftTypeMenuSelection = null;
+      setMenuOpen(typeMenu, typeMenuButton, false);
+      allTypesMode = true;
+      selectedTypes.clear();
+      update();
+    });
+  }
+  if (yearClearButton) {
+    yearClearButton.addEventListener("click", () => {
+      if (areAllYearsSelected()) return;
+      draftYearMenuSelection = null;
+      setMenuOpen(yearMenu, yearMenuButton, false);
+      allYearsMode = true;
+      selectedYears.clear();
+      update();
+    });
+  }
+  if (resetAllButton) {
+    resetAllButton.addEventListener("click", () => {
+      if (isDefaultFilterState()) {
+        return;
+      }
+      draftTypeMenuSelection = null;
+      draftYearMenuSelection = null;
+      setMenuOpen(typeMenu, typeMenuButton, false);
+      setMenuOpen(yearMenu, yearMenuButton, false);
+      allTypesMode = true;
+      selectedTypes.clear();
+      allYearsMode = true;
+      selectedYears.clear();
+      selectedYearMetricByYear.clear();
+      visibleYearMetricYears.clear();
+      filterableYearMetricsByYear.clear();
+      selectedFrequencyFactKey = null;
+      visibleFrequencyFilterableFactKeys.clear();
+      selectedFrequencyMetricKey = null;
+      visibleFrequencyFilterableMetricKeys.clear();
+      hoverClearedSummaryType = null;
+      hoverClearedSummaryYearMetricKey = null;
+      update({
+        resetCardScroll: true,
+        resetViewport: true,
+      });
+    });
+  }
+
+  document.addEventListener("pointerdown", (event) => {
+    const target = event.target;
+    let shouldRefreshMenus = false;
+    if (typeMenu && !typeMenu.contains(target)) {
+      if (typeMenu.classList.contains("open")) {
+        setMenuOpen(typeMenu, typeMenuButton, false);
+        shouldRefreshMenus = true;
+      }
+      if (draftTypeMenuSelection) {
+        draftTypeMenuSelection = null;
+        shouldRefreshMenus = true;
+      }
+    }
+    if (yearMenu && !yearMenu.contains(target)) {
+      if (yearMenu.classList.contains("open")) {
+        setMenuOpen(yearMenu, yearMenuButton, false);
+        shouldRefreshMenus = true;
+      }
+      if (draftYearMenuSelection) {
+        draftYearMenuSelection = null;
+        shouldRefreshMenus = true;
+      }
+    }
+    if (shouldRefreshMenus) {
+      update({ menuOnly: true });
+    }
+  });
+  update();
+
+  if (document.fonts?.ready) {
+    document.fonts.ready.then(() => {
+      requestLayoutAlignment();
+    }).catch(() => {});
+  }
+
+  window.addEventListener("resize", () => {
+    if (resizeTimer) {
+      window.clearTimeout(resizeTimer);
+    }
+    resizeTimer = window.setTimeout(() => {
+      const width = window.innerWidth;
+      const isNarrowLayout = isNarrowLayoutViewport();
+      const widthChanged = Math.abs(width - lastViewportWidth) >= 1;
+      const layoutModeChanged = isNarrowLayout !== lastIsNarrowLayout;
+      if (!widthChanged && !layoutModeChanged) {
+        return;
+      }
+      lastViewportWidth = width;
+      lastIsNarrowLayout = isNarrowLayout;
+      update();
+    }, 150);
+  });
+
+  if (isTouch) {
+    document.addEventListener("pointerdown", (event) => {
+      if (!tooltip.classList.contains("visible")) return;
+      const target = event.target;
+      if (tooltip.contains(target)) {
+        hideTooltip();
+        const active = document.querySelector(".cell.active");
+        if (active) active.classList.remove("active");
+        return;
+      }
+      if (!target.classList.contains("cell")) {
+        hideTooltip();
+        const active = document.querySelector(".cell.active");
+        if (active) active.classList.remove("active");
+      }
+    });
+
+    const dismissTooltipOnTouchScroll = () => {
+      hideTooltip();
+      const active = document.querySelector(".cell.active");
+      if (active) active.classList.remove("active");
+    };
+
+    document.addEventListener(
+      "scroll",
+      dismissTooltipOnTouchScroll,
+      { passive: true, capture: true },
+    );
+
+    window.addEventListener(
+      "scroll",
+      dismissTooltipOnTouchScroll,
+      { passive: true },
+    );
+
+    window.addEventListener(
+      "resize",
+      () => {
+        dismissTooltipOnTouchScroll();
+      },
+      { passive: true },
+    );
+  }
+}
+
+init().catch((error) => {
+  console.error(error);
+  renderLoadError(error);
+});

@@ -1,0 +1,85 @@
+# Base configuration. Put secrets in config.local.yaml (ignored by git).
+strava:
+  client_id: ""
+  client_secret: ""
+  refresh_token: ""
+
+sync:
+  # Optional history limits:
+  # start_date: "2019-01-01" # YYYY-MM-DD lower bound
+  # lookback_years: 5        # ignored when start_date is set
+  recent_days: 7
+  resume_backfill: true
+  per_page: 200
+  prune_deleted: false
+
+rate_limits:
+  overall_15_min: 200
+  overall_daily: 2000
+  read_15_min: 100
+  read_daily: 1000
+  safety_buffer: 2
+  min_interval_seconds: 10
+
+activities:
+  types:
+    - AlpineSki
+    - BackcountrySki
+    - Badminton
+    - Canoeing
+    - Crossfit
+    - EBikeRide
+    - Elliptical
+    - EMountainBikeRide
+    - Golf
+    - GravelRide
+    - Handcycle
+    - HighIntensityIntervalTraining
+    - Hike
+    - IceSkate
+    - InlineSkate
+    - Kayaking
+    - Kitesurf
+    - MountainBikeRide
+    - NordicSki
+    - Pickleball
+    - Pilates
+    - Racquetball
+    - Ride
+    - RockClimbing
+    - RollerSki
+    - Rowing
+    - Run
+    - Sail
+    - Skateboard
+    - Snowboard
+    - Snowshoe
+    - Soccer
+    - Squash
+    - StairStepper
+    - StandUpPaddling
+    - Surfing
+    - Swim
+    - TableTennis
+    - Tennis
+    - TrailRun
+    - Velomobile
+    - VirtualRide
+    - VirtualRow
+    - VirtualRun
+    - Walk
+    - WeightTraining
+    - Wheelchair
+    - Windsurf
+    - Workout
+    - Yoga
+  include_all_types: true   # include all configured Strava sport/activity types by default
+  exclude_types: []         # optional explicit exclusions while still allowing new sport types
+  group_other_types: false  # when false, keep raw Strava sport/activity names as-is
+  other_bucket: OtherSports # fallback bucket for unknown activity categories
+  group_aliases: {}         # optional explicit group overrides, e.g. {SkiErg: WinterSports}
+  type_aliases: {}          # optional explicit remaps; keep empty for exact Strava naming
+
+units:
+  distance: "mi"   # "mi" or "km"
+  elevation: "ft"  # "ft" or "m"

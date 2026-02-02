@@ -1,0 +1,22 @@
+# Secrets / tokens
+config.local.yaml
+.strava_token.json
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Raw activities (privacy)
+activities/raw/
+
+# Generated dashboard outputs (persisted on dashboard-data branch)
+data/
+heatmaps/
+site/data.json
+
+# OS
+.DS_Store
+
+# Local notes
+ISSUE_FIX_LOG.md
