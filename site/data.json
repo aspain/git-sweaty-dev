@@ -9337,6 +9337,13 @@
       "subtype": "WeightTraining",
       "type": "WeightTraining",
       "year": 2026
+    },
+    {
+      "date": "2026-02-11",
+      "hour": 8,
+      "subtype": "Hike",
+      "type": "Hike",
+      "year": 2026
     }
   ],
   "aggregates": {
@@ -21110,6 +21117,15 @@
           "distance": 2561.4,
           "elevation_gain": 55.0,
           "moving_time": 2347.0
+        },
+        "2026-02-11": {
+          "activity_ids": [
+            17362933694
+          ],
+          "count": 1,
+          "distance": 3451.4,
+          "elevation_gain": 100.0,
+          "moving_time": 2854.0
         }
       },
       "Ride": {
@@ -21345,7 +21361,7 @@
       }
     }
   },
-  "generated_at": "2026-02-11T13:38:20.817005+00:00",
+  "generated_at": "2026-02-11T14:39:48.574752+00:00",
   "other_bucket": "OtherSports",
   "type_meta": {
     "Hike": {
