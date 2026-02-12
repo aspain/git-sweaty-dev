@@ -114,33 +114,6 @@ Both options run the same workflow, which will:
 - `main` is intentionally kept free of generated `data/` and `site/data.json` artifacts so fork sync stays cleaner.
 - After syncing, run [Sync Heatmaps](../../actions/workflows/sync.yml) if you want your dashboard refreshed immediately.
 
-## Sport Type Note
-
-By default, all observed activity types from your selected source are included automatically when you run the workflow.
-Normalization prefers `sport_type` and falls back to `type` when `sport_type` is unavailable.
-Default config keeps raw type names as-is (no grouping buckets or alias remaps).
-Source-specific fields are mapped into the same normalized schema before aggregation.
-Garmin type keys are normalized to Strava-style canonical names (for example `running` -> `Run`, `indoor_cycling` -> `VirtualRide`) so provider choice does not change dashboard categorization.
-
-To narrow the dashboard to specific sport types:
-1. Edit [`config.yaml`](config.yaml) in your fork.
-2. Set `activities.include_all_types: false`.
-3. Set `activities.types` to only the type values you want.
-4. Run [Sync Heatmaps](../../actions/workflows/sync.yml) again.
-
-If you want "include everything except a few", keep `include_all_types: true` and set `activities.exclude_types`.
-
-Example:
-
-```yaml
-activities:
-  include_all_types: false
-  types:
-    - Run
-    - Ride
-    - WeightTraining
-```
-
 ## Configuration (Optional)
 
 Everything in this section is optional. Defaults work without changes.
