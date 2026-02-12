@@ -39,6 +39,23 @@ def _pick_duration_seconds(*values: Any) -> float:
     return first_numeric if first_numeric is not None else 0.0
 
 
+def _duration_candidates(activity: Dict[str, Any]) -> List[Any]:
+    return [
+        activity.get("moving_time"),
+        activity.get("movingDuration"),
+        activity.get("duration"),
+        activity.get("elapsedDuration"),
+        activity.get("elapsed_time"),
+        activity.get("elapsedTime"),
+        _get_nested(activity, ["summaryDTO", "movingDuration"]),
+        _get_nested(activity, ["summaryDTO", "duration"]),
+        _get_nested(activity, ["summaryDTO", "elapsedDuration"]),
+        _get_nested(activity, ["activitySummary", "movingDuration"]),
+        _get_nested(activity, ["activitySummary", "duration"]),
+        _get_nested(activity, ["activitySummary", "elapsedDuration"]),
+    ]
+
+
 def _get_nested(payload: Dict[str, Any], keys: List[str]) -> Any:
     value: Any = payload
     for key in keys:
@@ -75,14 +92,7 @@ def _normalize_activity(activity: Dict, type_aliases: Dict[str, str], source: st
     canonical_raw_type = _resolve_canonical_type(raw_type, source)
     activity_type = type_aliases.get(raw_type, type_aliases.get(canonical_raw_type, canonical_raw_type))
     distance = _coalesce(activity.get("distance"), activity.get("totalDistance"))
-    moving_time = _pick_duration_seconds(
-        activity.get("moving_time"),
-        activity.get("movingDuration"),
-        activity.get("duration"),
-        activity.get("elapsedDuration"),
-        activity.get("elapsed_time"),
-        activity.get("elapsedTime"),
-    )
+    moving_time = _pick_duration_seconds(*_duration_candidates(activity))
     elevation_gain = _coalesce(
         activity.get("total_elevation_gain"),
         activity.get("elevationGain"),

@@ -43,6 +43,22 @@ def _coalesce(*values: Any) -> Any:
     return None
 
 
+def _duration_candidates(payload: Dict[str, Any]) -> List[Any]:
+    return [
+        payload.get("movingDuration"),
+        payload.get("duration"),
+        payload.get("elapsedDuration"),
+        payload.get("moving_time"),
+        payload.get("elapsed_time"),
+        _get_nested(payload, ["summaryDTO", "movingDuration"]),
+        _get_nested(payload, ["summaryDTO", "duration"]),
+        _get_nested(payload, ["summaryDTO", "elapsedDuration"]),
+        _get_nested(payload, ["activitySummary", "movingDuration"]),
+        _get_nested(payload, ["activitySummary", "duration"]),
+        _get_nested(payload, ["activitySummary", "elapsedDuration"]),
+    ]
+
+
 def _pick_duration_seconds(*values: Any) -> float:
     """Prefer the first positive duration; otherwise fall back to first numeric value."""
     first_numeric: Optional[float] = None
@@ -97,13 +113,7 @@ def _normalize_activity(activity: Dict[str, Any]) -> Dict[str, Any]:
     start_local_str = str(start_local).replace(" ", "T")
 
     type_key = _activity_type_key(activity)
-    moving_time = _pick_duration_seconds(
-        activity.get("movingDuration"),
-        activity.get("duration"),
-        activity.get("elapsedDuration"),
-        activity.get("moving_time"),
-        activity.get("elapsed_time"),
-    )
+    moving_time = _pick_duration_seconds(*_duration_candidates(activity))
     elevation_gain = _coalesce(
         activity.get("elevationGain"),
         activity.get("totalElevationGain"),
@@ -130,6 +140,49 @@ def _normalize_activity(activity: Dict[str, Any]) -> Dict[str, Any]:
         "provider": "garmin",
     }
     return normalized
+
+
+def _fetch_activity_duration_from_summary(client: Any, activity_id: str) -> Optional[float]:
+    methods = [
+        ("get_activity", (activity_id,), {}),
+        ("getActivity", (activity_id,), {}),
+        ("get_activity_details", (activity_id,), {}),
+        ("getActivityDetails", (activity_id,), {}),
+    ]
+    for method_name, args, kwargs in methods:
+        method = getattr(client, method_name, None)
+        if not callable(method):
+            continue
+        try:
+            payload = method(*args, **kwargs)
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        value = _pick_duration_seconds(*_duration_candidates(payload))
+        if value > 0:
+            return value
+    return None
+
+
+def _enrich_missing_duration(
+    client: Any,
+    normalized: Dict[str, Any],
+    stats: Optional[Dict[str, int]] = None,
+) -> Dict[str, Any]:
+    if _safe_float(normalized.get("moving_time"), 0.0) > 0:
+        return normalized
+    activity_id = str(normalized.get("id") or "").strip()
+    if not activity_id:
+        return normalized
+    resolved = _fetch_activity_duration_from_summary(client, activity_id)
+    if not resolved or resolved <= 0:
+        return normalized
+    enriched = dict(normalized)
+    enriched["moving_time"] = resolved
+    if stats is not None:
+        stats["duration_enriched"] = int(stats.get("duration_enriched", 0)) + 1
+    return enriched
 
 
 def _activity_start_ts(activity: Dict[str, Any]) -> Optional[int]:
@@ -500,6 +553,7 @@ def _sync_recent(
     per_page: int,
     recent_days: int,
     dry_run: bool,
+    enrich_stats: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
     if recent_days <= 0:
         return {
@@ -539,6 +593,7 @@ def _sync_recent(
             activity = _normalize_activity(raw_activity)
             if not activity:
                 continue
+            activity = _enrich_missing_duration(client, activity, enrich_stats)
             ts = _activity_start_ts(activity)
             if ts is not None and ts < after:
                 reached_boundary = True
@@ -581,7 +636,8 @@ def sync_garmin(dry_run: bool, prune_deleted: bool) -> Dict[str, Any]:
     client = _load_garmin_client(config)
     ensure_dir(RAW_DIR)
 
-    recent_summary = _sync_recent(client, per_page, recent_days, dry_run)
+    enrich_stats: Dict[str, int] = {"duration_enriched": 0}
+    recent_summary = _sync_recent(client, per_page, recent_days, dry_run, enrich_stats)
 
     total = 0
     new_or_updated = 0
@@ -629,6 +685,7 @@ def sync_garmin(dry_run: bool, prune_deleted: bool) -> Dict[str, Any]:
                 activity = _normalize_activity(raw_activity)
                 if not activity:
                     continue
+                activity = _enrich_missing_duration(client, activity, enrich_stats)
                 ts = _activity_start_ts(activity)
                 if ts is not None and ts < after:
                     reached_boundary = True
@@ -704,6 +761,7 @@ def sync_garmin(dry_run: bool, prune_deleted: bool) -> Dict[str, Any]:
         "rate_limited": rate_limited,
         "backfill_completed": completed,
         "backfill_next_offset": next_offset,
+        "duration_enriched": int(enrich_stats.get("duration_enriched", 0)),
         "recent_sync": recent_summary,
     }
     if rate_limited:
@@ -739,6 +797,8 @@ def main() -> int:
             f"Sync Garmin: {summary['new_or_updated']} new/updated, "
             f"{summary['deleted']} deleted ({range_label})"
         )
+        if summary.get("duration_enriched"):
+            message += f", {summary['duration_enriched']} durations enriched"
         if summary.get("rate_limited"):
             message += " [rate limited]"
         with open(SUMMARY_TXT, "w", encoding="utf-8") as f:
