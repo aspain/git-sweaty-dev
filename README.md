@@ -72,6 +72,12 @@ Fastest path: fork, run one script, and let it configure the repository for you.
    python scripts/setup_auth.py
    ```
 
+   Optional (recommended when you have multiple local clones or GH_REPO set):
+
+   ```bash
+   python scripts/setup_auth.py --repo <your-username>/<repo-name>
+   ```
+
    By default this command will:
       - create `.venv` if needed
       - install/update requirements inside `.venv`

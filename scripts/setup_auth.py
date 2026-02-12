@@ -278,15 +278,29 @@ def _repo_slug_from_gh_context() -> Optional[str]:
 def _resolve_repo_slug(explicit_repo: Optional[str]) -> Optional[str]:
     candidates = [
         explicit_repo,
+        _repo_slug_from_git(),
         os.environ.get("GH_REPO"),
         _repo_slug_from_gh_context(),
-        _repo_slug_from_git(),
     ]
     for candidate in candidates:
         normalized = _normalize_repo_slug(candidate)
         if normalized:
             return normalized
     return None
+
+
+def _confirm_repo_interactive(repo: str) -> str:
+    prompt = (
+        f"Target GitHub repository is '{repo}'. "
+        "Press Enter to continue, or type OWNER/REPO to override: "
+    )
+    response = input(prompt).strip()
+    if not response:
+        return repo
+    override = _normalize_repo_slug(response)
+    if not override:
+        raise RuntimeError("Invalid repository override. Expected OWNER/REPO.")
+    return override
 
 
 def _project_root() -> str:
@@ -970,7 +984,10 @@ def main() -> int:
                 "Unable to determine repository in non-interactive mode. "
                 "Re-run with --repo OWNER/REPO."
             )
+    if interactive and not args.repo:
+        repo = _confirm_repo_interactive(repo)
     _assert_repo_access(repo)
+    print(f"Using repository: {repo}")
     source = _resolve_source(args, interactive)
 
     distance_unit, elevation_unit = _resolve_units(args, interactive)
