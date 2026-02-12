@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-12T20:48:21.017213+00:00",
+  "generated_at": "2026-02-12T21:09:55.724239+00:00",
   "years": {
     "2019": {
       "VirtualRide": {
@@ -44,7 +44,7 @@
           "moving_time": 1560.0
         }
       },
-      "indoor_cardio": {
+      "Workout": {
         "2019-06-26": {
           "activity_ids": [
             "3785552306"
@@ -1095,18 +1095,7 @@
           "moving_time": 2663.89599609375
         }
       },
-      "Yoga": {
-        "2020-04-18": {
-          "activity_ids": [
-            "4803538778"
-          ],
-          "count": 1,
-          "distance": 0.0,
-          "elevation_gain": 0.0,
-          "moving_time": 3777.52587890625
-        }
-      },
-      "indoor_cardio": {
+      "Workout": {
         "2020-01-04": {
           "activity_ids": [
             "4403173992"
@@ -1619,6 +1608,17 @@
           "distance": 23335.48828125,
           "elevation_gain": 0.0,
           "moving_time": 4356.8271484375
+        }
+      },
+      "Yoga": {
+        "2020-04-18": {
+          "activity_ids": [
+            "4803538778"
+          ],
+          "count": 1,
+          "distance": 0.0,
+          "elevation_gain": 0.0,
+          "moving_time": 3777.52587890625
         }
       }
     },
@@ -10739,7 +10739,7 @@
           "moving_time": 3509.507080078125
         }
       },
-      "indoor_cardio": {
+      "Workout": {
         "2025-04-04": {
           "activity_ids": [
             "18730548577"
@@ -11255,7 +11255,7 @@
           "moving_time": 3756.60888671875
         }
       },
-      "indoor_cardio": {
+      "Workout": {
         "2026-01-25": {
           "activity_ids": [
             "21661005183"
