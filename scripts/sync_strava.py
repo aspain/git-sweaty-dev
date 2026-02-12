@@ -12,14 +12,16 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from activity_types import featured_types_from_config
-from utils import ensure_dir, load_config, read_json, utc_now, write_json
+from utils import ensure_dir, load_config, raw_activity_dir, read_json, utc_now, write_json
 
 TOKEN_CACHE = ".strava_token.json"
-RAW_DIR = os.path.join("activities", "raw")
+RAW_DIR = raw_activity_dir("strava")
 SUMMARY_JSON = os.path.join("data", "last_sync_summary.json")
 SUMMARY_TXT = os.path.join("data", "last_sync_summary.txt")
-STATE_PATH = os.path.join("data", "backfill_state.json")
-ATHLETE_PATH = os.path.join("data", "athletes.json")
+STATE_PATH = os.path.join("data", "backfill_state_strava.json")
+LEGACY_STATE_PATH = os.path.join("data", "backfill_state.json")
+ATHLETE_PATH = os.path.join("data", "athletes_strava.json")
+LEGACY_ATHLETE_PATH = os.path.join("data", "athletes.json")
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504, 597}
 MAX_REQUEST_ATTEMPTS = 5
 
@@ -210,16 +212,19 @@ def _save_token_cache(payload: Dict) -> None:
 
 
 def _load_athlete_fingerprint() -> Optional[str]:
-    if not os.path.exists(ATHLETE_PATH):
-        return None
-    try:
-        payload = read_json(ATHLETE_PATH)
-    except Exception:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    value = payload.get("fingerprint")
-    return value if isinstance(value, str) and value else None
+    for path in [ATHLETE_PATH, LEGACY_ATHLETE_PATH]:
+        if not os.path.exists(path):
+            continue
+        try:
+            payload = read_json(path)
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        value = payload.get("fingerprint")
+        if isinstance(value, str) and value:
+            return value
+    return None
 
 
 def _write_athlete_fingerprint(fingerprint: str) -> None:
@@ -393,6 +398,7 @@ def _has_existing_data() -> bool:
     candidates = [
         os.path.join("data", "activities_normalized.json"),
         os.path.join("data", "daily_aggregates.json"),
+        os.path.join("data", "backfill_state_strava.json"),
         os.path.join("data", "backfill_state.json"),
         os.path.join("data", "last_sync_summary.json"),
         os.path.join("data", "last_sync_summary.txt"),
@@ -408,18 +414,26 @@ def _reset_persisted_data() -> None:
     paths = [
         os.path.join("data", "activities_normalized.json"),
         os.path.join("data", "daily_aggregates.json"),
+        os.path.join("data", "backfill_state_strava.json"),
         os.path.join("data", "backfill_state.json"),
         os.path.join("data", "last_sync_summary.json"),
         os.path.join("data", "last_sync_summary.txt"),
+        os.path.join("data", "athletes_strava.json"),
+        os.path.join("data", "athletes.json"),
         os.path.join("site", "data.json"),
     ]
     for path in paths:
         if os.path.exists(path):
             os.remove(path)
 
-    for dir_path in [RAW_DIR]:
-        if os.path.exists(dir_path):
-            shutil.rmtree(dir_path)
+    if os.path.exists(RAW_DIR):
+        shutil.rmtree(RAW_DIR)
+    legacy_raw_root = os.path.join("activities", "raw")
+    if os.path.isdir(legacy_raw_root):
+        for filename in os.listdir(legacy_raw_root):
+            legacy_path = os.path.join(legacy_raw_root, filename)
+            if os.path.isfile(legacy_path) and filename.endswith(".json"):
+                os.remove(legacy_path)
 
 
 def _fetch_recent_activity_ids(
@@ -511,12 +525,16 @@ def _write_activity(activity: Dict) -> bool:
 
 
 def _load_state() -> Dict:
-    if not os.path.exists(STATE_PATH):
-        return {}
-    try:
-        return read_json(STATE_PATH)
-    except Exception:
-        return {}
+    for path in [STATE_PATH, LEGACY_STATE_PATH]:
+        if not os.path.exists(path):
+            continue
+        try:
+            payload = read_json(path)
+        except Exception:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return {}
 
 
 def _save_state(state: Dict) -> None:
@@ -738,6 +756,7 @@ def sync_strava(dry_run: bool, prune_deleted: bool) -> Dict:
     total_new_or_updated = new_or_updated + int(recent_summary.get("new_or_updated", 0))
 
     summary = {
+        "source": "strava",
         "fetched": total_fetched,
         "new_or_updated": total_new_or_updated,
         "deleted": deleted,

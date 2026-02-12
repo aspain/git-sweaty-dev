@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-Bootstrap Strava OAuth and GitHub setup for this repository.
+Bootstrap activity-provider auth and GitHub setup for this repository.
 
 This script performs:
-1) Browser-based Strava OAuth authorization with a localhost callback.
-2) Authorization-code exchange for a refresh token.
-3) GitHub secret + variable updates via gh CLI.
-4) Best-effort GitHub setup automation (workflows, pages, first run).
+1) Provider-specific auth/bootstrap (Strava OAuth or Garmin credentials).
+2) GitHub secret + variable updates via gh CLI.
+3) Best-effort GitHub setup automation (workflows, pages, first run).
 """
 
 import argparse
@@ -36,6 +35,7 @@ AUTHORIZE_ENDPOINT = "https://www.strava.com/oauth/authorize"
 CALLBACK_PATH = "/exchange_token"
 DEFAULT_PORT = 8765
 DEFAULT_TIMEOUT = 180
+DEFAULT_SOURCE = "strava"
 
 STATUS_OK = "OK"
 STATUS_SKIPPED = "SKIPPED"
@@ -405,6 +405,26 @@ def _prompt_choice(prompt: str, choices: dict[str, str], default: str) -> str:
         print(f"Please enter one of: {allowed}")
 
 
+def _prompt_source() -> str:
+    print("\nChoose activity source:")
+    print("  1) Strava")
+    print("  2) Garmin")
+    selected = _prompt_choice(
+        "Selection [1]: ",
+        {"1": "strava", "2": "garmin"},
+        "1",
+    )
+    return selected
+
+
+def _resolve_source(args: argparse.Namespace, interactive: bool) -> str:
+    if args.source:
+        return args.source
+    if interactive:
+        return _prompt_source()
+    return DEFAULT_SOURCE
+
+
 def _prompt_units() -> Tuple[str, str]:
     print("\nChoose unit system:")
     print("  1) US (miles + feet)")
@@ -431,6 +451,36 @@ def _prompt_units() -> Tuple[str, str]:
         "ft",
     )
     return distance, elevation
+
+
+def _resolve_garmin_auth_values(args: argparse.Namespace, interactive: bool) -> Tuple[str, str, str]:
+    token_store_b64 = (args.garmin_token_store_b64 or "").strip()
+    email = (args.garmin_email or "").strip()
+    password = (args.garmin_password or "").strip()
+
+    if interactive and not token_store_b64 and not (email and password):
+        print("\nGarmin setup options:")
+        print("  1) Token store (recommended for CI stability)")
+        print("  2) Email + password")
+        print("  3) Both")
+        method = _prompt_choice(
+            "Selection [1]: ",
+            {"1": "token", "2": "password", "3": "both"},
+            "1",
+        )
+        if method in {"token", "both"} and not token_store_b64:
+            token_store_b64 = _prompt_secret_masked("GARMIN_TOKENS_B64: ").strip()
+        if method in {"password", "both"}:
+            if not email:
+                email = _prompt(None, "GARMIN_EMAIL")
+            if not password:
+                password = _prompt(None, "GARMIN_PASSWORD", secret=True)
+
+    if not token_store_b64 and not (email and password):
+        raise RuntimeError(
+            "Garmin setup requires GARMIN_TOKENS_B64 or GARMIN_EMAIL/GARMIN_PASSWORD."
+        )
+    return token_store_b64, email, password
 
 
 def _resolve_units(args: argparse.Namespace, interactive: bool) -> Tuple[str, str]:
@@ -603,8 +653,11 @@ def _try_configure_pages(repo: str) -> Tuple[bool, str]:
     return False, "Unable to configure GitHub Pages build type automatically."
 
 
-def _try_dispatch_sync(repo: str) -> Tuple[bool, str]:
-    result = _run(["gh", "workflow", "run", "sync.yml", "--repo", repo], check=False)
+def _try_dispatch_sync(repo: str, source: str) -> Tuple[bool, str]:
+    result = _run(
+        ["gh", "workflow", "run", "sync.yml", "--repo", repo, "-f", f"source={source}"],
+        check=False,
+    )
     if result.returncode != 0:
         return False, _first_stderr_line(result.stderr)
     return True, "Dispatched sync.yml via workflow_dispatch."
@@ -665,7 +718,13 @@ def _find_latest_workflow_run(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Bootstrap Strava OAuth and automate GitHub setup for this repository."
+        description="Bootstrap provider auth and automate GitHub setup for this repository."
+    )
+    parser.add_argument(
+        "--source",
+        choices=["strava", "garmin"],
+        default=None,
+        help="Activity source to configure.",
     )
     parser.add_argument("--client-id", default=None, help="Strava client ID.")
     parser.add_argument(
@@ -673,6 +732,9 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Strava client secret.",
     )
+    parser.add_argument("--garmin-token-store-b64", default=None, help="Garmin token store as base64.")
+    parser.add_argument("--garmin-email", default=None, help="Garmin account email.")
+    parser.add_argument("--garmin-password", default=None, help="Garmin account password.")
     parser.add_argument(
         "--repo",
         default=None,
@@ -752,43 +814,65 @@ def main() -> int:
                 "Re-run with --repo OWNER/REPO."
             )
     _assert_repo_access(repo)
-
-    if interactive and not args.client_id:
-        print("\nEnter your Strava API credentials from https://www.strava.com/settings/api")
-    if not interactive and not args.client_id:
-        raise RuntimeError("Missing STRAVA_CLIENT_ID in non-interactive mode. Re-run with --client-id.")
-    if not interactive and not args.client_secret:
-        raise RuntimeError("Missing STRAVA_CLIENT_SECRET in non-interactive mode. Re-run with --client-secret.")
-
-    client_id = _prompt(args.client_id, "STRAVA_CLIENT_ID")
-    client_secret = _prompt(args.client_secret, "STRAVA_CLIENT_SECRET", secret=True)
-    if not client_id or not client_secret:
-        if interactive:
-            raise ValueError("Both STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET are required.")
-        raise RuntimeError(
-            "Missing Strava credentials in non-interactive mode. "
-            "Provide both --client-id and --client-secret."
-        )
+    source = _resolve_source(args, interactive)
 
     distance_unit, elevation_unit = _resolve_units(args, interactive)
 
-    redirect_uri = f"http://localhost:{args.port}{CALLBACK_PATH}"
-    code = _authorize_and_get_code(
-        client_id=client_id,
-        redirect_uri=redirect_uri,
-        scope=args.scope,
-        port=args.port,
-        timeout_seconds=args.timeout,
-        open_browser=not args.no_browser,
-    )
-
-    tokens = _exchange_code_for_tokens(client_id, client_secret, code)
-    refresh_token = tokens["refresh_token"]
-
     print("\nUpdating repository secrets via gh...")
-    _set_secret("STRAVA_CLIENT_ID", client_id, repo)
-    _set_secret("STRAVA_CLIENT_SECRET", client_secret, repo)
-    _set_secret("STRAVA_REFRESH_TOKEN", refresh_token, repo)
+    configured_secret_names: list[str] = []
+    athlete_name = ""
+    if source == "strava":
+        if interactive and not args.client_id:
+            print("\nEnter your Strava API credentials from https://www.strava.com/settings/api")
+        if not interactive and not args.client_id:
+            raise RuntimeError("Missing STRAVA_CLIENT_ID in non-interactive mode. Re-run with --client-id.")
+        if not interactive and not args.client_secret:
+            raise RuntimeError("Missing STRAVA_CLIENT_SECRET in non-interactive mode. Re-run with --client-secret.")
+
+        client_id = _prompt(args.client_id, "STRAVA_CLIENT_ID")
+        client_secret = _prompt(args.client_secret, "STRAVA_CLIENT_SECRET", secret=True)
+        if not client_id or not client_secret:
+            if interactive:
+                raise ValueError("Both STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET are required.")
+            raise RuntimeError(
+                "Missing Strava credentials in non-interactive mode. "
+                "Provide both --client-id and --client-secret."
+            )
+
+        redirect_uri = f"http://localhost:{args.port}{CALLBACK_PATH}"
+        code = _authorize_and_get_code(
+            client_id=client_id,
+            redirect_uri=redirect_uri,
+            scope=args.scope,
+            port=args.port,
+            timeout_seconds=args.timeout,
+            open_browser=not args.no_browser,
+        )
+
+        tokens = _exchange_code_for_tokens(client_id, client_secret, code)
+        refresh_token = tokens["refresh_token"]
+
+        _set_secret("STRAVA_CLIENT_ID", client_id, repo)
+        _set_secret("STRAVA_CLIENT_SECRET", client_secret, repo)
+        _set_secret("STRAVA_REFRESH_TOKEN", refresh_token, repo)
+        configured_secret_names.extend(
+            ["STRAVA_CLIENT_ID", "STRAVA_CLIENT_SECRET", "STRAVA_REFRESH_TOKEN"]
+        )
+        athlete = tokens.get("athlete") or {}
+        athlete_name = " ".join(
+            [str(athlete.get("firstname", "")).strip(), str(athlete.get("lastname", "")).strip()]
+        ).strip()
+    elif source == "garmin":
+        token_store_b64, garmin_email, garmin_password = _resolve_garmin_auth_values(args, interactive)
+        if token_store_b64:
+            _set_secret("GARMIN_TOKENS_B64", token_store_b64, repo)
+            configured_secret_names.append("GARMIN_TOKENS_B64")
+        if garmin_email and garmin_password:
+            _set_secret("GARMIN_EMAIL", garmin_email, repo)
+            _set_secret("GARMIN_PASSWORD", garmin_password, repo)
+            configured_secret_names.extend(["GARMIN_EMAIL", "GARMIN_PASSWORD"])
+    else:
+        raise RuntimeError(f"Unsupported source: {source}")
 
     steps: list[StepResult] = []
     repo_url = f"https://github.com/{repo}"
@@ -799,8 +883,9 @@ def main() -> int:
     variables_settings_url = f"{repo_url}/settings/variables/actions"
 
     variable_errors = []
-    print("Updating repository unit variables via gh...")
+    print("Updating repository variables via gh...")
     for name, value in [
+        ("DASHBOARD_SOURCE", source),
         ("DASHBOARD_DISTANCE_UNIT", distance_unit),
         ("DASHBOARD_ELEVATION_UNIT", elevation_unit),
     ]:
@@ -812,37 +897,37 @@ def main() -> int:
     if variable_errors:
         _add_step(
             steps,
-            name="Store unit preferences",
+            name="Store dashboard variables",
             status=STATUS_MANUAL_REQUIRED,
-            detail=f"Could not store one or more unit variables automatically: {variable_errors[0]}",
+            detail=f"Could not store one or more dashboard variables automatically: {variable_errors[0]}",
             manual_help=(
-                f"Open {variables_settings_url} and set DASHBOARD_DISTANCE_UNIT={distance_unit} "
+                f"Open {variables_settings_url} and set DASHBOARD_SOURCE={source}, "
+                f"DASHBOARD_DISTANCE_UNIT={distance_unit} "
                 f"and DASHBOARD_ELEVATION_UNIT={elevation_unit}."
             ),
         )
     else:
         _add_step(
             steps,
-            name="Store unit preferences",
+            name="Store dashboard variables",
             status=STATUS_OK,
             detail=(
-                "Saved DASHBOARD_DISTANCE_UNIT="
-                f"{distance_unit} and DASHBOARD_ELEVATION_UNIT={elevation_unit}."
+                "Saved DASHBOARD_SOURCE="
+                f"{source}, DASHBOARD_DISTANCE_UNIT={distance_unit}, "
+                f"DASHBOARD_ELEVATION_UNIT={elevation_unit}."
             ),
         )
-
-    athlete = tokens.get("athlete") or {}
-    athlete_name = " ".join(
-        [str(athlete.get("firstname", "")).strip(), str(athlete.get("lastname", "")).strip()]
-    ).strip()
     print("\nCredentials configured.")
     if athlete_name:
         print(f"Authorized athlete: {athlete_name}")
-    print("Secrets set: STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET, STRAVA_REFRESH_TOKEN")
+    print(f"Source set: {source}")
+    if configured_secret_names:
+        print(f"Secrets set: {', '.join(configured_secret_names)}")
     if not variable_errors:
         print(
             "Variables set: "
-            f"DASHBOARD_DISTANCE_UNIT={distance_unit}, DASHBOARD_ELEVATION_UNIT={elevation_unit}"
+            f"DASHBOARD_SOURCE={source}, DASHBOARD_DISTANCE_UNIT={distance_unit}, "
+            f"DASHBOARD_ELEVATION_UNIT={elevation_unit}"
         )
 
     if args.no_auto_github:
@@ -882,7 +967,7 @@ def main() -> int:
         )
 
         dispatch_started_at = datetime.now(timezone.utc)
-        dispatched, dispatch_detail = _try_dispatch_sync(repo)
+        dispatched, dispatch_detail = _try_dispatch_sync(repo, source)
         _add_step(
             steps,
             name="Run first sync workflow",

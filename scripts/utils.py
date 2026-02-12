@@ -7,6 +7,8 @@ import yaml
 
 CONFIG_PATH = "config.yaml"
 CONFIG_LOCAL_PATH = "config.local.yaml"
+DEFAULT_SOURCE = "strava"
+SUPPORTED_SOURCES = {"strava", "garmin"}
 
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
@@ -33,6 +35,18 @@ def load_config() -> Dict[str, Any]:
             override = yaml.safe_load(f) or {}
         return _deep_merge(base, override)
     return base
+
+
+def normalize_source(value: Any) -> str:
+    source = str(value or DEFAULT_SOURCE).strip().lower()
+    if source not in SUPPORTED_SOURCES:
+        allowed = ", ".join(sorted(SUPPORTED_SOURCES))
+        raise ValueError(f"Unsupported source '{source}'. Supported values: {allowed}.")
+    return source
+
+
+def raw_activity_dir(source: str) -> str:
+    return os.path.join("activities", "raw", normalize_source(source))
 
 
 def ensure_dir(path: str) -> None:

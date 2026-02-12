@@ -1,8 +1,15 @@
 # Base configuration. Put secrets in config.local.yaml (ignored by git).
+source: "strava"  # "strava" or "garmin"
+
 strava:
   client_id: ""
   client_secret: ""
   refresh_token: ""
+
+garmin:
+  token_store_b64: ""
+  email: ""
+  password: ""
 
 sync:
   # Optional history limits:
@@ -73,12 +80,12 @@ activities:
     - Windsurf
     - Workout
     - Yoga
-  include_all_types: true   # include all configured Strava sport/activity types by default
+  include_all_types: true   # include all observed activity types by default
   exclude_types: []         # optional explicit exclusions while still allowing new sport types
-  group_other_types: false  # when false, keep raw Strava sport/activity names as-is
+  group_other_types: false  # when false, keep raw source activity names as-is
   other_bucket: OtherSports # fallback bucket for unknown activity categories
   group_aliases: {}         # optional explicit group overrides, e.g. {SkiErg: WinterSports}
-  type_aliases: {}          # optional explicit remaps; keep empty for exact Strava naming
+  type_aliases: {}          # optional explicit remaps; keep empty for exact source naming
 
 units:
   distance: "mi"   # "mi" or "km"

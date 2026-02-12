@@ -6,11 +6,20 @@ from typing import Optional
 
 from aggregate import aggregate as aggregate_func
 from normalize import normalize as normalize_func
+from sync_garmin import sync_garmin
 from sync_strava import sync_strava
-from utils import ensure_dir, write_json
+from utils import ensure_dir, load_config, normalize_source, write_json
 from generate_heatmaps import generate as generate_heatmaps
 
 README_MD = "README.md"
+SOURCE_STATE_PATH = os.path.join("data", "source_state.json")
+RESETTABLE_OUTPUTS = [
+    os.path.join("data", "activities_normalized.json"),
+    os.path.join("data", "daily_aggregates.json"),
+    os.path.join("data", "last_sync_summary.json"),
+    os.path.join("data", "last_sync_summary.txt"),
+    os.path.join("site", "data.json"),
+]
 README_LIVE_SITE_RE = re.compile(
     r"(?im)^(-\s*(?:Live site:\s*\[Interactive Heatmaps\]|View the Interactive \[Activity Dashboard\])\()https?://[^)]+(\)\s*)$",
     re.IGNORECASE,
@@ -79,15 +88,66 @@ def _update_readme_live_site_link() -> None:
         f.write(updated)
 
 
+def _load_last_source() -> Optional[str]:
+    if not os.path.exists(SOURCE_STATE_PATH):
+        return None
+    try:
+        import json
+
+        with open(SOURCE_STATE_PATH, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    value = payload.get("source")
+    if not isinstance(value, str):
+        return None
+    return value
+
+
+def _persist_source(source: str) -> None:
+    ensure_dir("data")
+    write_json(SOURCE_STATE_PATH, {"source": source})
+
+
+def _clear_outputs_for_source_switch() -> None:
+    for path in RESETTABLE_OUTPUTS:
+        if os.path.exists(path):
+            os.remove(path)
+
+
+def _sync_for_source(source: str, dry_run: bool, prune_deleted: bool):
+    if source == "strava":
+        return sync_strava(dry_run=dry_run, prune_deleted=prune_deleted)
+    if source == "garmin":
+        return sync_garmin(dry_run=dry_run, prune_deleted=prune_deleted)
+    raise ValueError(f"Unsupported source '{source}'")
+
+
 def run_pipeline(
     skip_sync: bool,
     dry_run: bool,
     prune_deleted: bool,
     update_readme_link: bool,
 ) -> None:
+    config = load_config()
+    source = normalize_source(config.get("source", "strava"))
+    previous_source = _load_last_source()
+    if previous_source and previous_source != source:
+        print(f"Source changed from {previous_source} to {source}; resetting persisted outputs.")
+        _clear_outputs_for_source_switch()
+    elif (
+        previous_source is None
+        and source != "strava"
+        and os.path.exists(os.path.join("data", "activities_normalized.json"))
+    ):
+        print("No saved source marker found; resetting persisted outputs to avoid mixed-source history.")
+        _clear_outputs_for_source_switch()
+
     if not skip_sync:
-        summary = sync_strava(dry_run=dry_run, prune_deleted=prune_deleted)
-        print(f"Synced: {summary}")
+        summary = _sync_for_source(source, dry_run=dry_run, prune_deleted=prune_deleted)
+        print(f"Synced ({source}): {summary}")
 
     items = normalize_func()
     _write_normalized(items)
@@ -96,12 +156,14 @@ def run_pipeline(
     _write_aggregates(aggregates)
 
     generate_heatmaps(write_svgs=False)
+    if not dry_run:
+        _persist_source(source)
     if update_readme_link:
         _update_readme_live_site_link()
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run Strava sync pipeline")
+    parser = argparse.ArgumentParser(description="Run activity sync pipeline")
     parser.add_argument("--skip-sync", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--prune-deleted", action="store_true")

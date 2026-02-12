@@ -1,17 +1,25 @@
-name: Sync Strava Heatmaps
+name: Sync Heatmaps
 
 on:
   schedule:
     - cron: "0 15 * * *"
   workflow_dispatch:
     inputs:
+      source:
+        description: "Data source"
+        required: false
+        type: choice
+        options:
+          - strava
+          - garmin
+        default: strava
       update_readme_link:
         description: "Update README dashboard URL in this fork"
         required: false
         type: boolean
         default: true
       full_backfill:
-        description: "Reset backfill cursor and re-fetch full Strava history"
+        description: "Reset backfill cursor and re-fetch full history for the selected source"
         required: false
         type: boolean
         default: false
@@ -42,16 +50,43 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Validate required Strava secrets
+      - name: Resolve source
         env:
+          WORKFLOW_SOURCE: ${{ github.event_name == 'workflow_dispatch' && inputs.source || '' }}
+          DASHBOARD_SOURCE: ${{ vars.DASHBOARD_SOURCE }}
+        run: |
+          source="${WORKFLOW_SOURCE:-${DASHBOARD_SOURCE:-strava}}"
+          source="$(echo "${source}" | tr '[:upper:]' '[:lower:]' | xargs)"
+          if [[ "${source}" != "strava" && "${source}" != "garmin" ]]; then
+            echo "Unsupported source '${source}'. Expected strava or garmin."
+            exit 1
+          fi
+          echo "SYNC_SOURCE=${source}" >> "$GITHUB_ENV"
+          echo "Using source: ${source}"
+
+      - name: Validate required source secrets
+        env:
+          SYNC_SOURCE: ${{ env.SYNC_SOURCE }}
           STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}
           STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}
           STRAVA_REFRESH_TOKEN: ${{ secrets.STRAVA_REFRESH_TOKEN }}
+          GARMIN_TOKENS_B64: ${{ secrets.GARMIN_TOKENS_B64 }}
+          GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
+          GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
         run: |
           missing=()
-          [[ -n "$STRAVA_CLIENT_ID" ]] || missing+=("STRAVA_CLIENT_ID")
-          [[ -n "$STRAVA_CLIENT_SECRET" ]] || missing+=("STRAVA_CLIENT_SECRET")
-          [[ -n "$STRAVA_REFRESH_TOKEN" ]] || missing+=("STRAVA_REFRESH_TOKEN")
+
+          if [[ "${SYNC_SOURCE}" == "strava" ]]; then
+            [[ -n "$STRAVA_CLIENT_ID" ]] || missing+=("STRAVA_CLIENT_ID")
+            [[ -n "$STRAVA_CLIENT_SECRET" ]] || missing+=("STRAVA_CLIENT_SECRET")
+            [[ -n "$STRAVA_REFRESH_TOKEN" ]] || missing+=("STRAVA_REFRESH_TOKEN")
+          elif [[ "${SYNC_SOURCE}" == "garmin" ]]; then
+            if [[ -z "$GARMIN_TOKENS_B64" && ( -z "$GARMIN_EMAIL" || -z "$GARMIN_PASSWORD" ) ]]; then
+              missing+=("GARMIN_TOKENS_B64 or GARMIN_EMAIL+GARMIN_PASSWORD")
+            fi
+          else
+            missing+=("SYNC_SOURCE must be strava or garmin")
+          fi
 
           if [ ${#missing[@]} -gt 0 ]; then
             echo "❌ Missing required repository secrets: ${missing[*]}"
@@ -61,18 +96,40 @@ jobs:
 
       - name: Write config.local.yaml
         env:
+          SYNC_SOURCE: ${{ env.SYNC_SOURCE }}
+          STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}
+          STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}
+          STRAVA_REFRESH_TOKEN: ${{ secrets.STRAVA_REFRESH_TOKEN }}
+          GARMIN_TOKENS_B64: ${{ secrets.GARMIN_TOKENS_B64 }}
+          GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
+          GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
           DASHBOARD_DISTANCE_UNIT: ${{ vars.DASHBOARD_DISTANCE_UNIT }}
           DASHBOARD_ELEVATION_UNIT: ${{ vars.DASHBOARD_ELEVATION_UNIT }}
         run: |
-          cat <<'CONFIG' > config.local.yaml
-          strava:
-            client_id: "${{ secrets.STRAVA_CLIENT_ID }}"
-            client_secret: "${{ secrets.STRAVA_CLIENT_SECRET }}"
-            refresh_token: "${{ secrets.STRAVA_REFRESH_TOKEN }}"
+          cat <<CONFIG > config.local.yaml
+          source: "${SYNC_SOURCE}"
           CONFIG
 
+          if [[ "${SYNC_SOURCE}" == "strava" ]]; then
+            cat <<CONFIG >> config.local.yaml
+          strava:
+            client_id: "${STRAVA_CLIENT_ID}"
+            client_secret: "${STRAVA_CLIENT_SECRET}"
+            refresh_token: "${STRAVA_REFRESH_TOKEN}"
+          CONFIG
+          else
+            cat <<CONFIG >> config.local.yaml
+          garmin:
+            token_store_b64: "${GARMIN_TOKENS_B64}"
+            email: "${GARMIN_EMAIL}"
+            password: "${GARMIN_PASSWORD}"
+          CONFIG
+          fi
+
           if [[ -n "${DASHBOARD_DISTANCE_UNIT}" || -n "${DASHBOARD_ELEVATION_UNIT}" ]]; then
-            echo "units:" >> config.local.yaml
+            cat <<'CONFIG' >> config.local.yaml
+          units:
+          CONFIG
             if [[ -n "${DASHBOARD_DISTANCE_UNIT}" ]]; then
               echo "  distance: \"${DASHBOARD_DISTANCE_UNIT}\"" >> config.local.yaml
             fi
@@ -80,6 +137,8 @@ jobs:
               echo "  elevation: \"${DASHBOARD_ELEVATION_UNIT}\"" >> config.local.yaml
             fi
           fi
+
+          echo "Generated config.local.yaml for source=${SYNC_SOURCE}"
 
       - name: Apply source-repo overrides (optional)
         if: ${{ github.repository == 'aspain/git-sweaty' }}
@@ -121,8 +180,11 @@ jobs:
             rm -f data/activities_normalized.json
             rm -f data/daily_aggregates.json
             rm -f data/backfill_state.json
+            rm -f data/backfill_state_strava.json
+            rm -f data/backfill_state_garmin.json
             rm -f data/last_sync_summary.json
             rm -f data/last_sync_summary.txt
+            rm -f data/source_state.json
             rm -f site/data.json
             echo "Full backfill requested: reset persisted pipeline outputs and backfill cursor."
           fi
@@ -187,7 +249,7 @@ jobs:
           fi
 
           summary_file="${GITHUB_WORKSPACE}/data/last_sync_summary.txt"
-          message="Sync Strava: update dashboard data"
+          message="Sync data: update dashboard data"
           if [ -s "${summary_file}" ]; then
             message="$(head -n 1 "${summary_file}")"
           fi

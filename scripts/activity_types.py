@@ -208,9 +208,156 @@ KNOWN_TYPE_GROUPS_BY_SLUG = {
     "velomobile": "AdaptiveSports",
 }
 
+# Garmin Connect type keys vary across devices/apps. Map known variants into
+# the same canonical sport names used by Strava-driven flows for parity.
+GARMIN_TYPE_ALIASES_BY_SLUG = {
+    "running": "Run",
+    "run": "Run",
+    "trailrunning": "TrailRun",
+    "trailrun": "TrailRun",
+    "ultrarun": "Run",
+    "trackrunning": "Run",
+    "virtualrun": "VirtualRun",
+    "treadmillrunning": "VirtualRun",
+    "walking": "Walk",
+    "walk": "Walk",
+    "hiking": "Hike",
+    "hike": "Hike",
+    "cycling": "Ride",
+    "bike": "Ride",
+    "biking": "Ride",
+    "roadbiking": "Ride",
+    "roadcycling": "Ride",
+    "indoorcycling": "VirtualRide",
+    "virtualcycling": "VirtualRide",
+    "virtualride": "VirtualRide",
+    "mountainbiking": "MountainBikeRide",
+    "mountainbike": "MountainBikeRide",
+    "gravelcycling": "GravelRide",
+    "gravelbiking": "GravelRide",
+    "ebiking": "EBikeRide",
+    "ebikeride": "EBikeRide",
+    "swimming": "Swim",
+    "swim": "Swim",
+    "poolswimming": "Swim",
+    "openwaterswimming": "Swim",
+    "rowing": "Rowing",
+    "indoorrowing": "VirtualRow",
+    "virtualrowing": "VirtualRow",
+    "alpineskiing": "AlpineSki",
+    "alpineski": "AlpineSki",
+    "crosscountryskiing": "NordicSki",
+    "crosscountryski": "NordicSki",
+    "nordicskiing": "NordicSki",
+    "nordicski": "NordicSki",
+    "snowboarding": "Snowboard",
+    "snowboard": "Snowboard",
+    "snowshoeing": "Snowshoe",
+    "snowshoe": "Snowshoe",
+    "iceskating": "IceSkate",
+    "iceskate": "IceSkate",
+    "inlineskating": "InlineSkate",
+    "inlineskate": "InlineSkate",
+    "strengthtraining": "WeightTraining",
+    "weighttraining": "WeightTraining",
+    "functionalstrengthtraining": "WeightTraining",
+    "cardio": "Workout",
+    "cardiotraining": "Workout",
+    "fitness": "Workout",
+    "fitnessequipment": "Workout",
+    "workout": "Workout",
+    "crossfit": "Crossfit",
+    "hiit": "HighIntensityIntervalTraining",
+    "highintensityintervaltraining": "HighIntensityIntervalTraining",
+    "elliptical": "Elliptical",
+    "stairstepper": "StairStepper",
+    "stepper": "StairStepper",
+    "yoga": "Yoga",
+    "pilates": "Pilates",
+    "golf": "Golf",
+    "kayaking": "Kayaking",
+    "canoeing": "Canoeing",
+    "standuppaddleboarding": "StandUpPaddling",
+    "standuppaddling": "StandUpPaddling",
+    "paddleboarding": "StandUpPaddling",
+    "surfing": "Surfing",
+    "windsurfing": "Windsurf",
+    "windsurf": "Windsurf",
+    "kitesurfing": "Kitesurf",
+    "kitesurf": "Kitesurf",
+    "sailing": "Sail",
+    "rockclimbing": "RockClimbing",
+    "climbing": "RockClimbing",
+    "bouldering": "RockClimbing",
+    "soccer": "Soccer",
+    "football": "Soccer",
+    "tennis": "Tennis",
+    "tabletennis": "TableTennis",
+    "pickleball": "Pickleball",
+    "badminton": "Badminton",
+    "squash": "Squash",
+    "racquetball": "Racquetball",
+    "wheelchair": "Wheelchair",
+    "handcycling": "Handcycle",
+    "handcycle": "Handcycle",
+}
+
 
 def _slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", (value or "").lower())
+
+
+def _virtual_variant(slug: str) -> str:
+    if "row" in slug:
+        return "VirtualRow"
+    if any(token in slug for token in ("ride", "bike", "cycle")):
+        return "VirtualRide"
+    if any(token in slug for token in ("run", "walk")):
+        return "VirtualRun"
+    return ""
+
+
+def canonicalize_activity_type(activity_type: str, source: str = "strava") -> str:
+    value = str(activity_type or "").strip()
+    if not value:
+        return "Unknown"
+    if value in STRAVA_ENUM_TYPES:
+        return value
+
+    slug = _slug(value)
+    if not slug:
+        return "Unknown"
+
+    # Convert case/spacing variants that already correspond to Strava values.
+    for known in STRAVA_ENUM_TYPES:
+        if _slug(known) == slug:
+            return known
+
+    if source == "garmin":
+        garmin_match = GARMIN_TYPE_ALIASES_BY_SLUG.get(slug)
+        if garmin_match:
+            return garmin_match
+        if "virtual" in slug:
+            virtual = _virtual_variant(slug)
+            if virtual:
+                return virtual
+
+    if any(token in slug for token in ("trail",)) and "run" in slug:
+        return "TrailRun"
+    if "run" in slug and "row" not in slug:
+        return "Run"
+    if any(token in slug for token in ("ride", "bike", "cycle")):
+        return "Ride"
+    if any(token in slug for token in ("weight", "strength")):
+        return "WeightTraining"
+    if "walk" in slug:
+        return "Walk"
+    if "hike" in slug:
+        return "Hike"
+    if "swim" in slug:
+        return "Swim"
+
+    return value
 
 
 def featured_types_from_config(config_activities: Dict) -> List[str]:
