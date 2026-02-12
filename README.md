@@ -213,7 +213,7 @@ Key options:
 
 - Raw activities are stored locally for processing but are not committed (`activities/raw/` is ignored). This prevents publishing detailed per-activity payloads and GPS location traces.
 - If neither `sync.start_date` nor `sync.lookback_years` is set, sync backfills all available history from the selected source.
-- A source marker (`data/source_state.json`) is persisted so switching from Strava to Garmin (or back) resets persisted outputs and avoids mixed-source history.
+- A source marker (`data/source_state.json`) is persisted so switching from Strava to Garmin (or back) triggers a full reset (persisted outputs, provider backfill cursors, and local raw cache) before syncing from scratch.
 - Strava backfill state is stored in `data/backfill_state_strava.json`; Garmin backfill state is stored in `data/backfill_state_garmin.json`.
 - Manual workflow runs include a `full_backfill` toggle that clears persisted pipeline outputs and source backfill cursors before syncing.
 - The GitHub Pages site is optimized for responsive desktop/mobile viewing.

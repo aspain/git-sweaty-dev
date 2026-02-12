@@ -20,6 +20,20 @@ RESETTABLE_OUTPUTS = [
     os.path.join("data", "last_sync_summary.txt"),
     os.path.join("site", "data.json"),
 ]
+RESETTABLE_STATE_FILES = [
+    os.path.join("data", "source_state.json"),
+    os.path.join("data", "backfill_state.json"),
+    os.path.join("data", "backfill_state_strava.json"),
+    os.path.join("data", "backfill_state_garmin.json"),
+    os.path.join("data", "athletes.json"),
+    os.path.join("data", "athletes_strava.json"),
+    os.path.join("data", "athletes_garmin.json"),
+]
+RESETTABLE_RAW_DIRS = [
+    os.path.join("activities", "raw"),
+    os.path.join("activities", "raw", "strava"),
+    os.path.join("activities", "raw", "garmin"),
+]
 README_LIVE_SITE_RE = re.compile(
     r"(?im)^(-\s*(?:Live site:\s*\[Interactive Heatmaps\]|View the Interactive \[Activity Dashboard\])\()https?://[^)]+(\)\s*)$",
     re.IGNORECASE,
@@ -117,6 +131,22 @@ def _clear_outputs_for_source_switch() -> None:
             os.remove(path)
 
 
+def _clear_state_for_source_switch() -> None:
+    for path in RESETTABLE_STATE_FILES:
+        if os.path.exists(path):
+            os.remove(path)
+    for path in RESETTABLE_RAW_DIRS:
+        if os.path.isdir(path):
+            import shutil
+
+            shutil.rmtree(path)
+
+
+def _reset_for_source_switch() -> None:
+    _clear_outputs_for_source_switch()
+    _clear_state_for_source_switch()
+
+
 def _sync_for_source(source: str, dry_run: bool, prune_deleted: bool):
     if source == "strava":
         return sync_strava(dry_run=dry_run, prune_deleted=prune_deleted)
@@ -135,15 +165,21 @@ def run_pipeline(
     source = normalize_source(config.get("source", "strava"))
     previous_source = _load_last_source()
     if previous_source and previous_source != source:
-        print(f"Source changed from {previous_source} to {source}; resetting persisted outputs.")
-        _clear_outputs_for_source_switch()
+        print(
+            f"Source changed from {previous_source} to {source}; "
+            "resetting persisted outputs, backfill state, and raw caches for a full fresh sync."
+        )
+        _reset_for_source_switch()
     elif (
         previous_source is None
         and source != "strava"
         and os.path.exists(os.path.join("data", "activities_normalized.json"))
     ):
-        print("No saved source marker found; resetting persisted outputs to avoid mixed-source history.")
-        _clear_outputs_for_source_switch()
+        print(
+            "No saved source marker found; resetting persisted outputs, backfill state, "
+            "and raw caches to avoid mixed-source history."
+        )
+        _reset_for_source_switch()
 
     if not skip_sync:
         summary = _sync_for_source(source, dry_run=dry_run, prune_deleted=prune_deleted)
