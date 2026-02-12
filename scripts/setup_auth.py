@@ -448,7 +448,7 @@ def _prompt_choice(prompt: str, choices: dict[str, str], default: str) -> str:
         if not answer:
             answer = default
         if answer in choices:
-            return answer
+            return choices[answer]
         allowed = ", ".join(sorted(choices.keys()))
         print(f"Please enter one of: {allowed}")
 
@@ -483,9 +483,9 @@ def _prompt_units() -> Tuple[str, str]:
         {"1": "us", "2": "metric", "3": "custom"},
         "1",
     )
-    if system == "1":
+    if system == "us":
         return UNIT_PRESETS["us"]
-    if system == "2":
+    if system == "metric":
         return UNIT_PRESETS["metric"]
 
     distance = _prompt_choice(
