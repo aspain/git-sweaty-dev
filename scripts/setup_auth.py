@@ -3,6 +3,7 @@
 Bootstrap activity-provider auth and GitHub setup for this repository.
 
 This script performs:
+0) Optional local virtualenv bootstrap (.venv + requirements install).
 1) Provider-specific auth/bootstrap (Strava OAuth or Garmin credentials).
 2) GitHub secret + variable updates via gh CLI.
 3) Best-effort GitHub setup automation (workflows, pages, first run).
@@ -36,6 +37,7 @@ CALLBACK_PATH = "/exchange_token"
 DEFAULT_PORT = 8765
 DEFAULT_TIMEOUT = 180
 DEFAULT_SOURCE = "strava"
+VENV_DIRNAME = ".venv"
 
 STATUS_OK = "OK"
 STATUS_SKIPPED = "SKIPPED"
@@ -131,6 +133,10 @@ def _run(
         capture_output=True,
         check=check,
     )
+
+
+def _run_stream(cmd: list[str], *, cwd: Optional[str] = None) -> None:
+    subprocess.run(cmd, check=True, cwd=cwd)
 
 
 def _first_stderr_line(stderr: str) -> str:
@@ -279,6 +285,48 @@ def _resolve_repo_slug(explicit_repo: Optional[str]) -> Optional[str]:
         if normalized:
             return normalized
     return None
+
+
+def _project_root() -> str:
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _in_virtualenv() -> bool:
+    base_prefix = getattr(sys, "base_prefix", sys.prefix)
+    real_prefix = getattr(sys, "real_prefix", None)
+    return bool(real_prefix or (sys.prefix != base_prefix))
+
+
+def _venv_python_path(venv_dir: str) -> str:
+    if os.name == "nt":
+        return os.path.join(venv_dir, "Scripts", "python.exe")
+    return os.path.join(venv_dir, "bin", "python")
+
+
+def _bootstrap_env_and_reexec(args: argparse.Namespace) -> None:
+    if args.no_bootstrap_env or args.env_bootstrapped or _in_virtualenv():
+        return
+
+    root = _project_root()
+    requirements = os.path.join(root, "requirements.txt")
+    if not os.path.exists(requirements):
+        return
+
+    venv_dir = os.path.join(root, VENV_DIRNAME)
+    venv_python = _venv_python_path(venv_dir)
+    if not os.path.exists(venv_python):
+        print("\nCreating local virtual environment (.venv)...")
+        _run_stream([sys.executable, "-m", "venv", venv_dir], cwd=root)
+
+    print("Installing Python dependencies into .venv...")
+    _run_stream([venv_python, "-m", "pip", "install", "--upgrade", "pip"], cwd=root)
+    _run_stream([venv_python, "-m", "pip", "install", "-r", requirements], cwd=root)
+
+    script_path = os.path.abspath(__file__)
+    child_args = [arg for arg in sys.argv[1:] if arg != "--env-bootstrapped"]
+    child_args.append("--env-bootstrapped")
+    print("Re-launching setup inside .venv...")
+    raise SystemExit(subprocess.call([venv_python, script_path, *child_args], cwd=root))
 
 
 def _set_secret(name: str, value: str, repo: str) -> None:
@@ -726,6 +774,16 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Activity source to configure.",
     )
+    parser.add_argument(
+        "--no-bootstrap-env",
+        action="store_true",
+        help="Skip automatic local virtualenv bootstrap (.venv + requirements install).",
+    )
+    parser.add_argument(
+        "--env-bootstrapped",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--client-id", default=None, help="Strava client ID.")
     parser.add_argument(
         "--client-secret",
@@ -790,6 +848,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    _bootstrap_env_and_reexec(args)
     interactive = _isatty()
 
     if args.port < 1 or args.port > 65535:

@@ -12,6 +12,43 @@ Automatically generates a free, interactive dashboard updated daily on GitHub Pa
 
 ## Quick Start
 
+### Python Environment Setup
+
+`scripts/setup_auth.py` now auto-bootstraps a local `.venv` and installs dependencies before continuing.
+
+Manual setup is still available if you prefer explicit environment control.
+
+Use an isolated virtual environment to avoid system-package-manager conflicts (for example Homebrew/PEP 668 `externally-managed-environment` errors on macOS).
+
+macOS/Linux:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Windows (PowerShell):
+
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Windows (Command Prompt):
+
+```bat
+py -3 -m venv .venv
+.\.venv\Scripts\activate.bat
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+If `python3` is not available on your machine, replace it with `python` or `py -3`.
+
 ### Option 1 (Recommended): Run the setup script
 
 Fastest path: fork, run one script, and let it configure the repository for you.
@@ -32,7 +69,18 @@ Fastest path: fork, run one script, and let it configure the repository for you.
 4. Run setup:
 
    ```bash
-   python3 scripts/setup_auth.py
+   python scripts/setup_auth.py
+   ```
+
+   By default this command will:
+      - create `.venv` if needed
+      - install/update requirements inside `.venv`
+      - re-launch setup inside that virtual environment
+
+   To skip auto-bootstrap and use your current Python environment:
+
+   ```bash
+   python scripts/setup_auth.py --no-bootstrap-env
    ```
 
    Follow the terminal prompts and choose a source:
