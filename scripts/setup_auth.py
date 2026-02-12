@@ -483,25 +483,63 @@ def _generate_garmin_token_store_b64(email: str, password: str) -> str:
             "Missing Garmin auth dependency 'garth'. Re-run setup without --no-bootstrap-env."
         ) from None
 
-    fd, token_path = tempfile.mkstemp(prefix="garmin-token-store-", suffix=".json")
-    os.close(fd)
-    try:
-        garth.login(email, password)
-        garth.save(token_path)
-        with open(token_path, "rb") as f:
-            encoded = base64.b64encode(f.read()).decode("ascii")
-        if not encoded:
-            raise RuntimeError("Generated Garmin token store was empty.")
-        return encoded
-    except Exception as exc:
-        raise RuntimeError(
-            f"Unable to generate GARMIN_TOKENS_B64 from provided Garmin credentials: {exc}"
-        ) from None
-    finally:
+    def _first_nonempty_file(path: str) -> Optional[bytes]:
+        if os.path.isfile(path):
+            with open(path, "rb") as f:
+                payload = f.read()
+            return payload if payload else None
+        if not os.path.isdir(path):
+            return None
+        for root, _dirs, files in os.walk(path):
+            for filename in sorted(files):
+                current = os.path.join(root, filename)
+                try:
+                    with open(current, "rb") as f:
+                        payload = f.read()
+                except OSError:
+                    continue
+                if payload:
+                    return payload
+        return None
+
+    with tempfile.TemporaryDirectory(prefix="garmin-token-store-") as tmpdir:
         try:
-            os.remove(token_path)
-        except OSError:
-            pass
+            garth.login(email, password)
+
+            save_targets = [
+                os.path.join(tmpdir, "garth-session.json"),
+                tmpdir,
+            ]
+            saved_target: Optional[str] = None
+            save_errors: list[str] = []
+            for target in save_targets:
+                try:
+                    garth.save(target)
+                    saved_target = target
+                    break
+                except Exception as exc:
+                    save_errors.append(str(exc))
+
+            if not saved_target:
+                details = "; ".join(save_errors) if save_errors else "unknown save failure"
+                raise RuntimeError(f"garth.save failed ({details})")
+
+            payload = _first_nonempty_file(saved_target)
+            if not payload:
+                # Some garth versions may ignore the requested path and write nearby;
+                # check the whole temporary workspace before failing.
+                payload = _first_nonempty_file(tmpdir)
+            if not payload:
+                raise RuntimeError("garth.save did not produce a readable token file.")
+
+            encoded = base64.b64encode(payload).decode("ascii")
+            if not encoded:
+                raise RuntimeError("Generated Garmin token store was empty.")
+            return encoded
+        except Exception as exc:
+            raise RuntimeError(
+                f"Unable to generate GARMIN_TOKENS_B64 from provided Garmin credentials: {exc}"
+            ) from None
 
 
 def _prompt_units() -> Tuple[str, str]:
