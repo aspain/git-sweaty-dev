@@ -855,6 +855,13 @@ def _try_dispatch_sync(repo: str, source: str) -> Tuple[bool, str]:
     return False, stderr_line
 
 
+def _try_dispatch_pages(repo: str) -> Tuple[bool, str]:
+    result = _run(["gh", "workflow", "run", "pages.yml", "--repo", repo], check=False)
+    if result.returncode != 0:
+        return False, _first_stderr_line(result.stderr)
+    return True, "Dispatched pages.yml via workflow_dispatch."
+
+
 def _watch_run(repo: str, run_id: int) -> Tuple[bool, str]:
     print(f"\nWatching workflow run {run_id}...")
     watch = subprocess.run(
@@ -1298,7 +1305,7 @@ def main() -> int:
                     workflow="pages.yml",
                     event="workflow_run",
                     not_before=pages_discovery_start,
-                    poll_attempts=45,
+                    poll_attempts=75,
                     sleep_seconds=2,
                     progress_label="Pages deploy run",
                 )
@@ -1310,13 +1317,46 @@ def main() -> int:
                         detail=f"Deploy Pages run URL: {pages_run_url}",
                     )
                 else:
-                    _add_step(
-                        steps,
-                        name="Locate Pages deploy run",
-                        status=STATUS_MANUAL_REQUIRED,
-                        detail="Could not find a Deploy Pages run after sync completed.",
-                        manual_help=pages_workflow_url,
-                    )
+                    manual_dispatched, manual_dispatch_detail = _try_dispatch_pages(repo)
+                    if manual_dispatched:
+                        pages_run_id, pages_run_url = _find_latest_workflow_run(
+                            repo=repo,
+                            workflow="pages.yml",
+                            event="workflow_dispatch",
+                            not_before=pages_discovery_start,
+                            poll_attempts=30,
+                            sleep_seconds=2,
+                            progress_label="manual Pages deploy run",
+                        )
+                        if pages_run_url:
+                            _add_step(
+                                steps,
+                                name="Locate Pages deploy run",
+                                status=STATUS_OK,
+                                detail=f"Deploy Pages run URL: {pages_run_url}",
+                            )
+                        else:
+                            _add_step(
+                                steps,
+                                name="Locate Pages deploy run",
+                                status=STATUS_MANUAL_REQUIRED,
+                                detail=(
+                                    "Could not find a Deploy Pages run after sync completed, and "
+                                    "manual pages dispatch did not surface a run URL automatically."
+                                ),
+                                manual_help=pages_workflow_url,
+                            )
+                    else:
+                        _add_step(
+                            steps,
+                            name="Locate Pages deploy run",
+                            status=STATUS_MANUAL_REQUIRED,
+                            detail=(
+                                "Could not find a Deploy Pages run after sync completed, and "
+                                f"automatic pages dispatch failed: {manual_dispatch_detail}"
+                            ),
+                            manual_help=pages_workflow_url,
+                        )
 
                 if pages_run_id is not None:
                     watched_pages, pages_watch_detail = _watch_run(repo, pages_run_id)
