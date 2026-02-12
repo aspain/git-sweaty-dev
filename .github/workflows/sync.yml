@@ -141,7 +141,7 @@ jobs:
           echo "Generated config.local.yaml for source=${SYNC_SOURCE}"
 
       - name: Apply source-repo overrides (optional)
-        if: ${{ github.repository == 'aspain/git-sweaty' }}
+        if: ${{ github.repository == 'aspain/git-sweaty-dev' }}
         env:
           DASHBOARD_EXCLUDE_TYPES: ${{ vars.DASHBOARD_EXCLUDE_TYPES }}
         run: |
