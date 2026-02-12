@@ -769,13 +769,27 @@ def _try_configure_pages(repo: str) -> Tuple[bool, str]:
 
 
 def _try_dispatch_sync(repo: str, source: str) -> Tuple[bool, str]:
-    result = _run(
+    with_source = _run(
         ["gh", "workflow", "run", "sync.yml", "--repo", repo, "-f", f"source={source}"],
         check=False,
     )
-    if result.returncode != 0:
-        return False, _first_stderr_line(result.stderr)
-    return True, "Dispatched sync.yml via workflow_dispatch."
+    if with_source.returncode == 0:
+        return True, "Dispatched sync.yml via workflow_dispatch."
+
+    stderr_line = _first_stderr_line(with_source.stderr)
+    if "Unexpected inputs provided" in stderr_line and "source" in stderr_line:
+        without_source = _run(
+            ["gh", "workflow", "run", "sync.yml", "--repo", repo],
+            check=False,
+        )
+        if without_source.returncode == 0:
+            return (
+                True,
+                "Dispatched sync.yml via workflow_dispatch (workflow does not declare 'source' input; using DASHBOARD_SOURCE variable/default).",
+            )
+        return False, _first_stderr_line(without_source.stderr)
+
+    return False, stderr_line
 
 
 def _watch_run(repo: str, run_id: int) -> Tuple[bool, str]:
