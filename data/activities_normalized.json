@@ -5580,18 +5580,6 @@
     "year": 2022
   },
   {
-    "date": "2022-03-06",
-    "distance": 0.0,
-    "elevation_gain": 0.0,
-    "id": 6784247782,
-    "moving_time": 1592.0,
-    "raw_activity_type": "Yoga",
-    "raw_type": "Yoga",
-    "start_date_local": "2022-03-06T14:06:12Z",
-    "type": "Yoga",
-    "year": 2022
-  },
-  {
     "date": "2022-03-07",
     "distance": 17168.8,
     "elevation_gain": 463.0,
@@ -5613,18 +5601,6 @@
     "raw_type": "WeightTraining",
     "start_date_local": "2022-03-08T07:24:42Z",
     "type": "WeightTraining",
-    "year": 2022
-  },
-  {
-    "date": "2022-03-09",
-    "distance": 0.0,
-    "elevation_gain": 0.0,
-    "id": 6799425046,
-    "moving_time": 1816.0,
-    "raw_activity_type": "Yoga",
-    "raw_type": "Yoga",
-    "start_date_local": "2022-03-09T15:36:41Z",
-    "type": "Yoga",
     "year": 2022
   },
   {
@@ -8373,18 +8349,6 @@
     "raw_type": "Run",
     "start_date_local": "2023-04-09T09:41:32Z",
     "type": "Run",
-    "year": 2023
-  },
-  {
-    "date": "2023-04-10",
-    "distance": 2860.5,
-    "elevation_gain": 34.0,
-    "id": 8865902761,
-    "moving_time": 2930.0,
-    "raw_activity_type": "Walk",
-    "raw_type": "Walk",
-    "start_date_local": "2023-04-10T08:38:50Z",
-    "type": "Walk",
     "year": 2023
   },
   {
@@ -15765,18 +15729,6 @@
     "raw_type": "Hike",
     "start_date_local": "2025-11-20T08:07:20Z",
     "type": "Hike",
-    "year": 2025
-  },
-  {
-    "date": "2025-11-21",
-    "distance": 1665.8,
-    "elevation_gain": 40.0,
-    "id": 16524167331,
-    "moving_time": 1267.0,
-    "raw_activity_type": "Walk",
-    "raw_type": "Walk",
-    "start_date_local": "2025-11-21T08:26:29Z",
-    "type": "Walk",
     "year": 2025
   },
   {
