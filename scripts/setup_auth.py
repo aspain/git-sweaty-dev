@@ -10,6 +10,7 @@ This script performs:
 """
 
 import argparse
+import base64
 import getpass
 import html
 import http.server
@@ -20,6 +21,7 @@ import shutil
 import socketserver
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -473,6 +475,35 @@ def _resolve_source(args: argparse.Namespace, interactive: bool) -> str:
     return DEFAULT_SOURCE
 
 
+def _generate_garmin_token_store_b64(email: str, password: str) -> str:
+    try:
+        import garth
+    except ImportError:
+        raise RuntimeError(
+            "Missing Garmin auth dependency 'garth'. Re-run setup without --no-bootstrap-env."
+        ) from None
+
+    fd, token_path = tempfile.mkstemp(prefix="garmin-token-store-", suffix=".json")
+    os.close(fd)
+    try:
+        garth.login(email, password)
+        garth.save(token_path)
+        with open(token_path, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode("ascii")
+        if not encoded:
+            raise RuntimeError("Generated Garmin token store was empty.")
+        return encoded
+    except Exception as exc:
+        raise RuntimeError(
+            f"Unable to generate GARMIN_TOKENS_B64 from provided Garmin credentials: {exc}"
+        ) from None
+    finally:
+        try:
+            os.remove(token_path)
+        except OSError:
+            pass
+
+
 def _prompt_units() -> Tuple[str, str]:
     print("\nChoose unit system:")
     print("  1) US (miles + feet)")
@@ -506,28 +537,26 @@ def _resolve_garmin_auth_values(args: argparse.Namespace, interactive: bool) -> 
     email = (args.garmin_email or "").strip()
     password = (args.garmin_password or "").strip()
 
-    if interactive and not token_store_b64 and not (email and password):
-        print("\nGarmin setup options:")
-        print("  1) Token store (recommended for CI stability)")
-        print("  2) Email + password")
-        print("  3) Both")
-        method = _prompt_choice(
-            "Selection [1]: ",
-            {"1": "token", "2": "password", "3": "both"},
-            "1",
-        )
-        if method in {"token", "both"} and not token_store_b64:
-            token_store_b64 = _prompt_secret_masked("GARMIN_TOKENS_B64: ").strip()
-        if method in {"password", "both"}:
-            if not email:
+    if not token_store_b64:
+        if not email:
+            if interactive:
                 email = _prompt(None, "GARMIN_EMAIL")
-            if not password:
+            else:
+                raise RuntimeError(
+                    "Missing Garmin credentials in non-interactive mode. "
+                    "Provide --garmin-token-store-b64 or --garmin-email/--garmin-password."
+                )
+        if not password:
+            if interactive:
                 password = _prompt(None, "GARMIN_PASSWORD", secret=True)
+            else:
+                raise RuntimeError(
+                    "Missing Garmin credentials in non-interactive mode. "
+                    "Provide --garmin-token-store-b64 or --garmin-email/--garmin-password."
+                )
+        print("Generating GARMIN_TOKENS_B64 from Garmin credentials...")
+        token_store_b64 = _generate_garmin_token_store_b64(email, password)
 
-    if not token_store_b64 and not (email and password):
-        raise RuntimeError(
-            "Garmin setup requires GARMIN_TOKENS_B64 or GARMIN_EMAIL/GARMIN_PASSWORD."
-        )
     return token_store_b64, email, password
 
 
@@ -790,9 +819,26 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Strava client secret.",
     )
-    parser.add_argument("--garmin-token-store-b64", default=None, help="Garmin token store as base64.")
-    parser.add_argument("--garmin-email", default=None, help="Garmin account email.")
-    parser.add_argument("--garmin-password", default=None, help="Garmin account password.")
+    parser.add_argument(
+        "--garmin-token-store-b64",
+        default=None,
+        help="Garmin token store as base64 (optional; generated from email/password if omitted).",
+    )
+    parser.add_argument(
+        "--garmin-email",
+        default=None,
+        help="Garmin account email (used to generate GARMIN_TOKENS_B64 when token is omitted).",
+    )
+    parser.add_argument(
+        "--garmin-password",
+        default=None,
+        help="Garmin account password (used to generate GARMIN_TOKENS_B64 when token is omitted).",
+    )
+    parser.add_argument(
+        "--store-garmin-password-secrets",
+        action="store_true",
+        help="Also store GARMIN_EMAIL and GARMIN_PASSWORD secrets (normally only GARMIN_TOKENS_B64 is stored).",
+    )
     parser.add_argument(
         "--repo",
         default=None,
@@ -926,7 +972,7 @@ def main() -> int:
         if token_store_b64:
             _set_secret("GARMIN_TOKENS_B64", token_store_b64, repo)
             configured_secret_names.append("GARMIN_TOKENS_B64")
-        if garmin_email and garmin_password:
+        if args.store_garmin_password_secrets and garmin_email and garmin_password:
             _set_secret("GARMIN_EMAIL", garmin_email, repo)
             _set_secret("GARMIN_PASSWORD", garmin_password, repo)
             configured_secret_names.extend(["GARMIN_EMAIL", "GARMIN_PASSWORD"])
