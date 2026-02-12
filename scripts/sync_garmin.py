@@ -43,6 +43,23 @@ def _coalesce(*values: Any) -> Any:
     return None
 
 
+def _pick_duration_seconds(*values: Any) -> float:
+    """Prefer the first positive duration; otherwise fall back to first numeric value."""
+    first_numeric: Optional[float] = None
+    for value in values:
+        if value in (None, "", []):
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if first_numeric is None:
+            first_numeric = number
+        if number > 0:
+            return number
+    return first_numeric if first_numeric is not None else 0.0
+
+
 def _get_nested(payload: Dict[str, Any], keys: List[str]) -> Any:
     value: Any = payload
     for key in keys:
@@ -80,11 +97,12 @@ def _normalize_activity(activity: Dict[str, Any]) -> Dict[str, Any]:
     start_local_str = str(start_local).replace(" ", "T")
 
     type_key = _activity_type_key(activity)
-    moving_time = _coalesce(
+    moving_time = _pick_duration_seconds(
         activity.get("movingDuration"),
         activity.get("duration"),
         activity.get("elapsedDuration"),
         activity.get("moving_time"),
+        activity.get("elapsed_time"),
     )
     elevation_gain = _coalesce(
         activity.get("elevationGain"),

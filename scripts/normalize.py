@@ -22,6 +22,23 @@ def _safe_float(value: Any) -> float:
         return 0.0
 
 
+def _pick_duration_seconds(*values: Any) -> float:
+    """Prefer a positive duration value when multiple provider fields are present."""
+    first_numeric = None
+    for value in values:
+        if value in (None, "", []):
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if first_numeric is None:
+            first_numeric = number
+        if number > 0:
+            return number
+    return first_numeric if first_numeric is not None else 0.0
+
+
 def _get_nested(payload: Dict[str, Any], keys: List[str]) -> Any:
     value: Any = payload
     for key in keys:
@@ -58,11 +75,13 @@ def _normalize_activity(activity: Dict, type_aliases: Dict[str, str], source: st
     canonical_raw_type = _resolve_canonical_type(raw_type, source)
     activity_type = type_aliases.get(raw_type, type_aliases.get(canonical_raw_type, canonical_raw_type))
     distance = _coalesce(activity.get("distance"), activity.get("totalDistance"))
-    moving_time = _coalesce(
+    moving_time = _pick_duration_seconds(
         activity.get("moving_time"),
         activity.get("movingDuration"),
         activity.get("duration"),
         activity.get("elapsedDuration"),
+        activity.get("elapsed_time"),
+        activity.get("elapsedTime"),
     )
     elevation_gain = _coalesce(
         activity.get("total_elevation_gain"),
