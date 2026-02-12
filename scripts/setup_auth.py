@@ -14,6 +14,7 @@ import base64
 import getpass
 import html
 import http.server
+import io
 import os
 import re
 import secrets
@@ -28,6 +29,7 @@ import urllib.parse
 import urllib.request
 import json
 import webbrowser
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional, Tuple
@@ -497,59 +499,70 @@ def _generate_garmin_token_store_b64(email: str, password: str) -> str:
             "Missing Garmin auth dependency 'garth'. Re-run setup without --no-bootstrap-env."
         ) from None
 
-    def _first_nonempty_file(path: str) -> Optional[bytes]:
-        if os.path.isfile(path):
-            with open(path, "rb") as f:
-                payload = f.read()
-            return payload if payload else None
-        if not os.path.isdir(path):
-            return None
-        for root, _dirs, files in os.walk(path):
-            for filename in sorted(files):
-                current = os.path.join(root, filename)
-                try:
-                    with open(current, "rb") as f:
-                        payload = f.read()
-                except OSError:
-                    continue
-                if payload:
-                    return payload
-        return None
+    def _token_store_ready(directory: str) -> bool:
+        return (
+            os.path.isfile(os.path.join(directory, "oauth1_token.json"))
+            and os.path.isfile(os.path.join(directory, "oauth2_token.json"))
+        )
+
+    def _hydrate_from_legacy_file(path: str, directory: str) -> None:
+        if not os.path.isfile(path):
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except Exception:
+            return
+        if not isinstance(payload, dict):
+            return
+
+        oauth1 = payload.get("oauth1_token")
+        oauth2 = payload.get("oauth2_token")
+        if isinstance(oauth1, dict):
+            with open(os.path.join(directory, "oauth1_token.json"), "w", encoding="utf-8") as f:
+                json.dump(oauth1, f)
+        if isinstance(oauth2, dict):
+            with open(os.path.join(directory, "oauth2_token.json"), "w", encoding="utf-8") as f:
+                json.dump(oauth2, f)
+
+    def _encode_dir_as_zip_b64(directory: str) -> str:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for root, _dirs, files in os.walk(directory):
+                for filename in sorted(files):
+                    full_path = os.path.join(root, filename)
+                    rel_path = os.path.relpath(full_path, directory)
+                    archive.write(full_path, arcname=rel_path)
+        data = buffer.getvalue()
+        if not data:
+            raise RuntimeError("Generated Garmin token store archive was empty.")
+        return base64.b64encode(data).decode("ascii")
 
     with tempfile.TemporaryDirectory(prefix="garmin-token-store-") as tmpdir:
         try:
             garth.login(email, password)
-
-            save_targets = [
-                os.path.join(tmpdir, "garth-session.json"),
-                tmpdir,
-            ]
-            saved_target: Optional[str] = None
             save_errors: list[str] = []
-            for target in save_targets:
+            try:
+                garth.save(tmpdir)
+            except Exception as exc:
+                save_errors.append(str(exc))
+
+            if not _token_store_ready(tmpdir):
+                legacy_path = os.path.join(tmpdir, "garth-session.json")
                 try:
-                    garth.save(target)
-                    saved_target = target
-                    break
+                    garth.save(legacy_path)
                 except Exception as exc:
                     save_errors.append(str(exc))
+                _hydrate_from_legacy_file(legacy_path, tmpdir)
 
-            if not saved_target:
+            if not _token_store_ready(tmpdir):
                 details = "; ".join(save_errors) if save_errors else "unknown save failure"
-                raise RuntimeError(f"garth.save failed ({details})")
+                raise RuntimeError(
+                    "garth token store is incomplete (expected oauth1_token.json and oauth2_token.json). "
+                    f"Save details: {details}"
+                )
 
-            payload = _first_nonempty_file(saved_target)
-            if not payload:
-                # Some garth versions may ignore the requested path and write nearby;
-                # check the whole temporary workspace before failing.
-                payload = _first_nonempty_file(tmpdir)
-            if not payload:
-                raise RuntimeError("garth.save did not produce a readable token file.")
-
-            encoded = base64.b64encode(payload).decode("ascii")
-            if not encoded:
-                raise RuntimeError("Generated Garmin token store was empty.")
-            return encoded
+            return _encode_dir_as_zip_b64(tmpdir)
         except Exception as exc:
             raise RuntimeError(
                 f"Unable to generate GARMIN_TOKENS_B64 from provided Garmin credentials: {exc}"
@@ -808,10 +821,13 @@ def _try_dispatch_sync(repo: str, source: str) -> Tuple[bool, str]:
 
 def _watch_run(repo: str, run_id: int) -> Tuple[bool, str]:
     print(f"\nWatching workflow run {run_id}...")
-    watch = subprocess.run(["gh", "run", "watch", str(run_id), "--repo", repo], check=False)
+    watch = subprocess.run(
+        ["gh", "run", "watch", str(run_id), "--repo", repo, "--exit-status"],
+        check=False,
+    )
     if watch.returncode == 0:
         return True, "Workflow run completed (see output above)."
-    return False, "Could not watch the workflow run automatically."
+    return False, "Workflow run failed or could not be watched to completion."
 
 
 def _find_latest_workflow_run(
@@ -903,7 +919,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--store-garmin-password-secrets",
         action="store_true",
-        help="Also store GARMIN_EMAIL and GARMIN_PASSWORD secrets (normally only GARMIN_TOKENS_B64 is stored).",
+        help="Deprecated: GARMIN_EMAIL and GARMIN_PASSWORD are now stored automatically when provided.",
     )
     parser.add_argument(
         "--repo",
@@ -1041,7 +1057,7 @@ def main() -> int:
         if token_store_b64:
             _set_secret("GARMIN_TOKENS_B64", token_store_b64, repo)
             configured_secret_names.append("GARMIN_TOKENS_B64")
-        if args.store_garmin_password_secrets and garmin_email and garmin_password:
+        if garmin_email and garmin_password:
             _set_secret("GARMIN_EMAIL", garmin_email, repo)
             _set_secret("GARMIN_PASSWORD", garmin_password, repo)
             configured_secret_names.extend(["GARMIN_EMAIL", "GARMIN_PASSWORD"])

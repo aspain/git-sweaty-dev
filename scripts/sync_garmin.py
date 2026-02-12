@@ -2,10 +2,12 @@ import argparse
 import base64
 import hashlib
 import hmac
+import io
 import json
 import os
 import shutil
 import sys
+import zipfile
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -281,12 +283,40 @@ def _load_token_store_bytes(config: Dict[str, Any]) -> Optional[bytes]:
 
 
 def _write_token_store(token_bytes: bytes) -> str:
-    with open(TOKEN_STORE_PATH, "wb") as f:
-        f.write(token_bytes)
+    if os.path.isfile(TOKEN_STORE_PATH):
+        os.remove(TOKEN_STORE_PATH)
+    elif os.path.isdir(TOKEN_STORE_PATH):
+        shutil.rmtree(TOKEN_STORE_PATH)
+    ensure_dir(TOKEN_STORE_PATH)
+
+    extracted = False
     try:
-        os.chmod(TOKEN_STORE_PATH, 0o600)
-    except OSError:
-        pass
+        with zipfile.ZipFile(io.BytesIO(token_bytes)) as archive:
+            archive.extractall(TOKEN_STORE_PATH)
+            extracted = True
+    except (zipfile.BadZipFile, ValueError):
+        extracted = False
+
+    if extracted:
+        return TOKEN_STORE_PATH
+
+    # Legacy fallback for earlier secret format variants.
+    try:
+        payload = json.loads(token_bytes.decode("utf-8"))
+    except Exception:
+        payload = None
+    if isinstance(payload, dict):
+        oauth1 = payload.get("oauth1_token")
+        oauth2 = payload.get("oauth2_token")
+        if isinstance(oauth1, dict):
+            write_json(os.path.join(TOKEN_STORE_PATH, "oauth1_token.json"), oauth1)
+        if isinstance(oauth2, dict):
+            write_json(os.path.join(TOKEN_STORE_PATH, "oauth2_token.json"), oauth2)
+        if "oauth_token" in payload and "oauth_token_secret" in payload:
+            write_json(os.path.join(TOKEN_STORE_PATH, "oauth1_token.json"), payload)
+        if "access_token" in payload:
+            write_json(os.path.join(TOKEN_STORE_PATH, "oauth2_token.json"), payload)
+
     return TOKEN_STORE_PATH
 
 

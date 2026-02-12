@@ -89,15 +89,9 @@ Fastest path: fork, run one script, and let it configure the repository for you.
    python scripts/setup_auth.py --no-bootstrap-env
    ```
 
-   To also store `GARMIN_EMAIL` and `GARMIN_PASSWORD` repo secrets (not required by default):
-
-   ```bash
-   python scripts/setup_auth.py --store-garmin-password-secrets
-   ```
-
    Follow the terminal prompts and choose a source:
       - `strava` (OAuth flow with `STRAVA_CLIENT_ID` and `STRAVA_CLIENT_SECRET`)
-      - `garmin` (prompts for Garmin email/password, generates `GARMIN_TOKENS_B64`, and stores that secret)
+      - `garmin` (prompts for Garmin email/password, generates `GARMIN_TOKENS_B64`, and stores `GARMIN_TOKENS_B64` + Garmin email/password secrets for fallback auth)
       - unit preference (`US`, `Metric`, or `Custom`)
 
    If you choose `strava`, create a [Strava API application](https://www.strava.com/settings/api) first and set **Authorization Callback Domain** to `localhost`.
@@ -121,7 +115,7 @@ Fastest path: fork, run one script, and let it configure the repository for you.
       - You can generate/update the refresh token by running `python3 scripts/setup_auth.py --source strava` locally.
    - For `garmin`:
       - Preferred: `GARMIN_TOKENS_B64`
-      - Optional fallback: `GARMIN_EMAIL` and `GARMIN_PASSWORD` (only needed if token secret is not used)
+      - Fallback: `GARMIN_EMAIL` and `GARMIN_PASSWORD`
 
 4. Enable GitHub Pages (repo → [Settings → Pages](../../settings/pages)):
    - Under **Build and deployment**, set **Source** to **GitHub Actions**.
