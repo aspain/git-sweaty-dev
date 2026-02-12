@@ -837,8 +837,12 @@ def _find_latest_workflow_run(
     not_before: datetime,
     poll_attempts: int = 12,
     sleep_seconds: int = 2,
+    progress_label: Optional[str] = None,
 ) -> Tuple[Optional[int], Optional[str]]:
-    for _ in range(poll_attempts):
+    if progress_label:
+        timeout_seconds = poll_attempts * sleep_seconds
+        print(f"\nWaiting for {progress_label} (up to {timeout_seconds}s)...")
+    for attempt in range(1, poll_attempts + 1):
         result = _run(
             [
                 "gh",
@@ -870,7 +874,11 @@ def _find_latest_workflow_run(
                     run_id = run.get("databaseId")
                     run_url = run.get("url")
                     if isinstance(run_id, int):
+                        if progress_label:
+                            print(f"Detected {progress_label}.")
                         return run_id, str(run_url) if run_url else None
+        if progress_label and (attempt == 1 or attempt % 5 == 0):
+            print(f"Still waiting for {progress_label}... ({attempt}/{poll_attempts})")
         time.sleep(sleep_seconds)
     return None, None
 
@@ -1175,6 +1183,7 @@ def main() -> int:
                 workflow="sync.yml",
                 event="workflow_dispatch",
                 not_before=dispatch_started_at,
+                progress_label="Sync workflow run",
             )
             if run_url:
                 _add_step(
@@ -1255,6 +1264,7 @@ def main() -> int:
                     not_before=pages_discovery_start,
                     poll_attempts=45,
                     sleep_seconds=2,
+                    progress_label="Pages deploy run",
                 )
                 if pages_run_url:
                     _add_step(

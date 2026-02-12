@@ -10,6 +10,7 @@ on:
   workflow_dispatch: {}
   workflow_run:
     workflows:
+      - Sync Heatmaps
       - Sync Strava Heatmaps
     types:
       - completed
