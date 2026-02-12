@@ -12,43 +12,6 @@ Automatically generates a free, interactive dashboard updated daily on GitHub Pa
 
 ## Quick Start
 
-### Python Environment Setup
-
-`scripts/setup_auth.py` now auto-bootstraps a local `.venv` and installs dependencies before continuing.
-
-Manual setup is still available if you prefer explicit environment control.
-
-Use an isolated virtual environment to avoid system-package-manager conflicts (for example Homebrew/PEP 668 `externally-managed-environment` errors on macOS).
-
-macOS/Linux:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-```
-
-Windows (PowerShell):
-
-```powershell
-py -3 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-```
-
-Windows (Command Prompt):
-
-```bat
-py -3 -m venv .venv
-.\.venv\Scripts\activate.bat
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-```
-
-If `python3` is not available on your machine, replace it with `python` or `py -3`.
-
 ### Option 1 (Recommended): Run the setup script
 
 Fastest path: fork, run one script, and let it configure the repository for you.
@@ -72,23 +35,6 @@ Fastest path: fork, run one script, and let it configure the repository for you.
    python scripts/setup_auth.py
    ```
 
-   Optional (recommended when you have multiple local clones or GH_REPO set):
-
-   ```bash
-   python scripts/setup_auth.py --repo <your-username>/<repo-name>
-   ```
-
-   By default this command will:
-      - create `.venv` if needed
-      - install/update requirements inside `.venv`
-      - re-launch setup inside that virtual environment
-
-   To skip auto-bootstrap and use your current Python environment:
-
-   ```bash
-   python scripts/setup_auth.py --no-bootstrap-env
-   ```
-
    Follow the terminal prompts and choose a source:
       - `strava` (OAuth flow with `STRAVA_CLIENT_ID` and `STRAVA_CLIENT_SECRET`)
       - `garmin` (prompts for Garmin email/password, generates `GARMIN_TOKENS_B64`, and stores `GARMIN_TOKENS_B64` + Garmin email/password secrets for fallback auth)
@@ -99,6 +45,15 @@ Fastest path: fork, run one script, and let it configure the repository for you.
    The setup may take several minutes to complete when run for the first time.  
    If any automation step fails, the script prints steps to remedy the failed step.  
    Once the script succeeds, it will provide the URL for your dashboard.
+
+### Switching Sources Later
+
+You can switch between `strava` and `garmin` any time, even after initial setup.
+
+- Re-run `python scripts/setup_auth.py` and choose a different source (or pass `--source strava` / `--source garmin`).
+- This updates `DASHBOARD_SOURCE`, so future scheduled runs use the new source until you change it again.
+- The first sync after a source change resets provider-specific state and rebuilds from the selected source.
+- Using the workflow **Run workflow** `source` input is a one-time override for that run only (it does not permanently change `DASHBOARD_SOURCE`).
 
 ### Option 2: Manual setup (no local clone required)
 
