@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-12T21:17:13.814271+00:00",
+  "generated_at": "2026-02-12T21:21:36.362457+00:00",
   "years": {
     "2019": {
       "VirtualRide": {
@@ -31,17 +31,6 @@
           "distance": 0.0,
           "elevation_gain": 0.0,
           "moving_time": 2400.884033203125
-        }
-      },
-      "Walk": {
-        "2019-06-17": {
-          "activity_ids": [
-            "3757917081"
-          ],
-          "count": 1,
-          "distance": 2020.1700439453125,
-          "elevation_gain": 28.0,
-          "moving_time": 1560.0
         }
       },
       "Workout": {
@@ -1608,17 +1597,6 @@
           "distance": 23335.48828125,
           "elevation_gain": 0.0,
           "moving_time": 4356.8271484375
-        }
-      },
-      "Yoga": {
-        "2020-04-18": {
-          "activity_ids": [
-            "4803538778"
-          ],
-          "count": 1,
-          "distance": 0.0,
-          "elevation_gain": 0.0,
-          "moving_time": 3777.52587890625
         }
       }
     },
@@ -4649,26 +4627,6 @@
           "elevation_gain": 0.0,
           "moving_time": 1359.135986328125
         }
-      },
-      "Yoga": {
-        "2022-03-06": {
-          "activity_ids": [
-            "8411493580"
-          ],
-          "count": 1,
-          "distance": 0.0,
-          "elevation_gain": 0.0,
-          "moving_time": 1590.8299560546875
-        },
-        "2022-03-09": {
-          "activity_ids": [
-            "8429130083"
-          ],
-          "count": 1,
-          "distance": 0.0,
-          "elevation_gain": 0.0,
-          "moving_time": 1815.52197265625
-        }
       }
     },
     "2023": {
@@ -5961,17 +5919,6 @@
           "distance": 5252.18994140625,
           "elevation_gain": 44.0,
           "moving_time": 2128.072021484375
-        }
-      },
-      "Walk": {
-        "2023-04-10": {
-          "activity_ids": [
-            "10874698312"
-          ],
-          "count": 1,
-          "distance": 2877.659912109375,
-          "elevation_gain": 34.0,
-          "moving_time": 2587.0
         }
       },
       "WeightTraining": {
@@ -9725,17 +9672,6 @@
           "distance": 0.0,
           "elevation_gain": 0.0,
           "moving_time": 1367.0
-        }
-      },
-      "Walk": {
-        "2025-11-21": {
-          "activity_ids": [
-            "21051356279"
-          ],
-          "count": 1,
-          "distance": 1665.760009765625,
-          "elevation_gain": 40.0,
-          "moving_time": 1241.0
         }
       },
       "WeightTraining": {

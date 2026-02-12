@@ -2,13 +2,6 @@
   "activities": [
     {
       "date": "2019-06-17",
-      "hour": 17,
-      "subtype": "walking",
-      "type": "Walk",
-      "year": 2019
-    },
-    {
-      "date": "2019-06-17",
       "hour": 19,
       "subtype": "indoor_cycling",
       "type": "VirtualRide",
@@ -509,13 +502,6 @@
       "hour": 7,
       "subtype": "indoor_cardio",
       "type": "Workout",
-      "year": 2020
-    },
-    {
-      "date": "2020-04-18",
-      "hour": 13,
-      "subtype": "yoga",
-      "type": "Yoga",
       "year": 2020
     },
     {
@@ -2458,13 +2444,6 @@
       "year": 2022
     },
     {
-      "date": "2022-03-06",
-      "hour": 14,
-      "subtype": "yoga",
-      "type": "Yoga",
-      "year": 2022
-    },
-    {
       "date": "2022-03-07",
       "hour": 7,
       "subtype": "virtual_ride",
@@ -2476,13 +2455,6 @@
       "hour": 7,
       "subtype": "strength_training",
       "type": "WeightTraining",
-      "year": 2022
-    },
-    {
-      "date": "2022-03-09",
-      "hour": 15,
-      "subtype": "yoga",
-      "type": "Yoga",
       "year": 2022
     },
     {
@@ -4086,13 +4058,6 @@
       "hour": 9,
       "subtype": "running",
       "type": "Run",
-      "year": 2023
-    },
-    {
-      "date": "2023-04-10",
-      "hour": 8,
-      "subtype": "walking",
-      "type": "Walk",
       "year": 2023
     },
     {
@@ -8394,13 +8359,6 @@
       "year": 2025
     },
     {
-      "date": "2025-11-21",
-      "hour": 8,
-      "subtype": "walking",
-      "type": "Walk",
-      "year": 2025
-    },
-    {
       "date": "2025-11-22",
       "hour": 9,
       "subtype": "running",
@@ -8803,17 +8761,6 @@
           "distance": 0.0,
           "elevation_gain": 0.0,
           "moving_time": 2400.884033203125
-        }
-      },
-      "Walk": {
-        "2019-06-17": {
-          "activity_ids": [
-            "3757917081"
-          ],
-          "count": 1,
-          "distance": 2020.1700439453125,
-          "elevation_gain": 28.0,
-          "moving_time": 1560.0
         }
       },
       "Workout": {
@@ -10380,17 +10327,6 @@
           "distance": 23335.48828125,
           "elevation_gain": 0.0,
           "moving_time": 4356.8271484375
-        }
-      },
-      "Yoga": {
-        "2020-04-18": {
-          "activity_ids": [
-            "4803538778"
-          ],
-          "count": 1,
-          "distance": 0.0,
-          "elevation_gain": 0.0,
-          "moving_time": 3777.52587890625
         }
       }
     },
@@ -13421,26 +13357,6 @@
           "elevation_gain": 0.0,
           "moving_time": 1359.135986328125
         }
-      },
-      "Yoga": {
-        "2022-03-06": {
-          "activity_ids": [
-            "8411493580"
-          ],
-          "count": 1,
-          "distance": 0.0,
-          "elevation_gain": 0.0,
-          "moving_time": 1590.8299560546875
-        },
-        "2022-03-09": {
-          "activity_ids": [
-            "8429130083"
-          ],
-          "count": 1,
-          "distance": 0.0,
-          "elevation_gain": 0.0,
-          "moving_time": 1815.52197265625
-        }
       }
     },
     "2023": {
@@ -14733,17 +14649,6 @@
           "distance": 5252.18994140625,
           "elevation_gain": 44.0,
           "moving_time": 2128.072021484375
-        }
-      },
-      "Walk": {
-        "2023-04-10": {
-          "activity_ids": [
-            "10874698312"
-          ],
-          "count": 1,
-          "distance": 2877.659912109375,
-          "elevation_gain": 34.0,
-          "moving_time": 2587.0
         }
       },
       "WeightTraining": {
@@ -18499,17 +18404,6 @@
           "moving_time": 1367.0
         }
       },
-      "Walk": {
-        "2025-11-21": {
-          "activity_ids": [
-            "21051356279"
-          ],
-          "count": 1,
-          "distance": 1665.760009765625,
-          "elevation_gain": 40.0,
-          "moving_time": 1241.0
-        }
-      },
       "WeightTraining": {
         "2025-01-02": {
           "activity_ids": [
@@ -20049,7 +19943,7 @@
       }
     }
   },
-  "generated_at": "2026-02-12T21:17:13.834237+00:00",
+  "generated_at": "2026-02-12T21:21:36.382221+00:00",
   "other_bucket": "OtherSports",
   "source": "garmin",
   "type_meta": {
@@ -20069,10 +19963,6 @@
       "accent": "#fee440",
       "label": "Virtual Ride"
     },
-    "Walk": {
-      "accent": "#d6ff6b",
-      "label": "Walk"
-    },
     "WeightTraining": {
       "accent": "#ff71ce",
       "label": "Weight Training"
@@ -20080,10 +19970,6 @@
     "Workout": {
       "accent": "#ff8a5b",
       "label": "Other Workout"
-    },
-    "Yoga": {
-      "accent": "#f15bb5",
-      "label": "Yoga"
     }
   },
   "types": [
@@ -20091,10 +19977,8 @@
     "Ride",
     "Run",
     "VirtualRide",
-    "Walk",
     "WeightTraining",
-    "Workout",
-    "Yoga"
+    "Workout"
   ],
   "units": {
     "distance": "mi",
