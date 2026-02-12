@@ -34,6 +34,7 @@ const tooltip = document.getElementById("tooltip");
 const summary = document.getElementById("summary");
 const updated = document.getElementById("updated");
 const repoLink = document.querySelector(".repo-link");
+const dashboardTitle = document.getElementById("dashboardTitle");
 const isTouch = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
 const BREAKPOINTS = Object.freeze({
   NARROW_LAYOUT_MAX: 900,
@@ -116,6 +117,22 @@ function syncRepoLink() {
   const href = `https://github.com/${inferred.owner}/${inferred.repo}`;
   repoLink.href = href;
   repoLink.textContent = `${inferred.owner}/${inferred.repo}`;
+}
+
+function providerDisplayName(source) {
+  const normalized = String(source || "").trim().toLowerCase();
+  if (normalized === "garmin") return "Garmin";
+  if (normalized === "strava") return "Strava";
+  return "";
+}
+
+function setDashboardTitle(source) {
+  const provider = providerDisplayName(source);
+  const title = provider ? `${provider} Activity Heatmaps` : "Activity Heatmaps";
+  if (dashboardTitle) {
+    dashboardTitle.textContent = title;
+  }
+  document.title = title;
 }
 
 function readCssVar(name, fallback, scope) {
@@ -2201,6 +2218,7 @@ async function init() {
   if (!payload || typeof payload !== "object") {
     throw new Error("Invalid dashboard data format.");
   }
+  setDashboardTitle(payload.source);
   TYPE_META = payload.type_meta || {};
   OTHER_BUCKET = String(payload.other_bucket || "OtherSports");
   (payload.types || []).forEach((type) => {

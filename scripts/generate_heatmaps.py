@@ -10,6 +10,7 @@ from utils import (
     format_duration,
     format_elevation,
     load_config,
+    normalize_source,
     parse_iso_datetime,
     read_json,
     utc_now,
@@ -296,6 +297,7 @@ def generate(write_svgs: bool = True):
                     f.write(svg)
 
     site_payload = {
+        "source": normalize_source(config.get("source", "strava")),
         "generated_at": utc_now().isoformat(),
         "years": years,
         "types": types,
