@@ -150,6 +150,22 @@ def _first_stderr_line(stderr: str) -> str:
     return text.splitlines()[0]
 
 
+def _is_transient_gh_failure(stderr: str) -> bool:
+    text = (stderr or "").lower()
+    transient_tokens = [
+        "http 500",
+        "http 502",
+        "http 503",
+        "http 504",
+        "timed out",
+        "timeout",
+        "temporarily unavailable",
+        "connection reset",
+        "connection refused",
+    ]
+    return any(token in text for token in transient_tokens)
+
+
 def _isatty() -> bool:
     return bool(sys.stdin.isatty() and sys.stdout.isatty())
 
@@ -349,22 +365,42 @@ def _bootstrap_env_and_reexec(args: argparse.Namespace) -> None:
 
 def _set_secret(name: str, value: str, repo: str) -> None:
     cmd = ["gh", "secret", "set", name, "--repo", repo]
-    try:
-        _run(cmd, input_text=value, check=True)
-    except subprocess.CalledProcessError as exc:
-        stderr = (exc.stderr or "").strip()
+    max_attempts = 4
+    for attempt in range(1, max_attempts + 1):
+        result = _run(cmd, input_text=value, check=False)
+        if result.returncode == 0:
+            return
+        stderr = (result.stderr or "").strip()
+        if attempt < max_attempts and _is_transient_gh_failure(stderr):
+            sleep_seconds = min(8, 2 ** (attempt - 1))
+            print(
+                f"Transient error setting secret {name}; retrying in {sleep_seconds}s "
+                f"(attempt {attempt}/{max_attempts})..."
+            )
+            time.sleep(sleep_seconds)
+            continue
         detail = f": {stderr.splitlines()[0]}" if stderr else ""
-        raise RuntimeError(f"Failed to set GitHub secret {name}{detail}") from None
+        raise RuntimeError(f"Failed to set GitHub secret {name}{detail}")
 
 
 def _set_variable(name: str, value: str, repo: str) -> None:
     cmd = ["gh", "variable", "set", name, "--repo", repo, "--body", value]
-    try:
-        _run(cmd, check=True)
-    except subprocess.CalledProcessError as exc:
-        stderr = (exc.stderr or "").strip()
+    max_attempts = 4
+    for attempt in range(1, max_attempts + 1):
+        result = _run(cmd, check=False)
+        if result.returncode == 0:
+            return
+        stderr = (result.stderr or "").strip()
+        if attempt < max_attempts and _is_transient_gh_failure(stderr):
+            sleep_seconds = min(8, 2 ** (attempt - 1))
+            print(
+                f"Transient error setting variable {name}; retrying in {sleep_seconds}s "
+                f"(attempt {attempt}/{max_attempts})..."
+            )
+            time.sleep(sleep_seconds)
+            continue
         detail = f": {stderr.splitlines()[0]}" if stderr else ""
-        raise RuntimeError(f"Failed to set GitHub variable {name}{detail}") from None
+        raise RuntimeError(f"Failed to set GitHub variable {name}{detail}")
 
 
 def _authorize_and_get_code(
