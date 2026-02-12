@@ -264,6 +264,7 @@ GARMIN_TYPE_ALIASES_BY_SLUG = {
     "cardio": "Workout",
     "indoorcardio": "Workout",
     "cardiotraining": "Workout",
+    "other": "Workout",
     "fitness": "Workout",
     "fitnessequipment": "Workout",
     "workout": "Workout",
