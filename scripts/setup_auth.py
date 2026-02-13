@@ -496,15 +496,31 @@ def _pages_url_from_slug(slug: str) -> str:
     return f"https://{owner}.github.io/{repo}/"
 
 
-def _prompt_choice(prompt: str, choices: dict[str, str], default: str) -> str:
+def _prompt_choice(
+    prompt: str,
+    choices: dict[str, str],
+    default: Optional[str] = None,
+    invalid_message: Optional[str] = None,
+) -> str:
     while True:
         answer = input(prompt).strip().lower()
         if not answer:
-            answer = default
+            if default is not None:
+                answer = default
+            else:
+                if invalid_message:
+                    print(invalid_message)
+                else:
+                    allowed = ", ".join(sorted(choices.keys()))
+                    print(f"Please enter one of: {allowed}")
+                continue
         if answer in choices:
             return choices[answer]
-        allowed = ", ".join(sorted(choices.keys()))
-        print(f"Please enter one of: {allowed}")
+        if invalid_message:
+            print(invalid_message)
+        else:
+            allowed = ", ".join(sorted(choices.keys()))
+            print(f"Please enter one of: {allowed}")
 
 
 def _prompt_source() -> str:
@@ -512,9 +528,10 @@ def _prompt_source() -> str:
     print("  1) Strava")
     print("  2) Garmin")
     selected = _prompt_choice(
-        "Selection [1]: ",
+        "Selection (enter 1 or 2): ",
         {"1": "strava", "2": "garmin"},
-        "1",
+        default=None,
+        invalid_message="Please enter '1' or '2'.",
     )
     return selected
 
@@ -609,28 +626,13 @@ def _prompt_units() -> Tuple[str, str]:
     print("\nChoose unit system:")
     print("  1) US (miles + feet)")
     print("  2) Metric (km + meters)")
-    print("  3) Custom")
     system = _prompt_choice(
-        "Selection [1]: ",
-        {"1": "us", "2": "metric", "3": "custom"},
-        "1",
+        "Selection (enter 1 or 2): ",
+        {"1": "us", "2": "metric"},
+        default=None,
+        invalid_message="Please enter '1' or '2'.",
     )
-    if system == "us":
-        return UNIT_PRESETS["us"]
-    if system == "metric":
-        return UNIT_PRESETS["metric"]
-
-    distance = _prompt_choice(
-        "Distance unit [mi/km] (default: mi): ",
-        {"mi": "mi", "km": "km"},
-        "mi",
-    )
-    elevation = _prompt_choice(
-        "Elevation unit [ft/m] (default: ft): ",
-        {"ft": "ft", "m": "m"},
-        "ft",
-    )
-    return distance, elevation
+    return UNIT_PRESETS[system]
 
 
 def _resolve_garmin_auth_values(args: argparse.Namespace, interactive: bool) -> Tuple[str, str, str]:
@@ -662,37 +664,15 @@ def _resolve_garmin_auth_values(args: argparse.Namespace, interactive: bool) -> 
 
 
 def _resolve_units(args: argparse.Namespace, interactive: bool) -> Tuple[str, str]:
-    distance = args.distance_unit
-    elevation = args.elevation_unit
-
     if args.unit_system:
-        preset_distance, preset_elevation = UNIT_PRESETS[args.unit_system]
-        if not distance:
-            distance = preset_distance
-        if not elevation:
-            elevation = preset_elevation
-
-    if distance and elevation:
-        return distance, elevation
+        return UNIT_PRESETS[args.unit_system]
 
     if interactive:
-        prompt_distance, prompt_elevation = _prompt_units()
-        if not distance:
-            distance = prompt_distance
-        if not elevation:
-            elevation = prompt_elevation
-        return distance, elevation
+        return _prompt_units()
 
-    missing = []
-    if not distance:
-        missing.append("--distance-unit")
-    if not elevation:
-        missing.append("--elevation-unit")
-    missing_flags = ", ".join(missing)
     raise RuntimeError(
         "Missing unit selection in non-interactive mode. "
-        "Provide both --distance-unit/--elevation-unit or pass --unit-system {us|metric}. "
-        f"Missing: {missing_flags}."
+        "Provide --unit-system {us|metric}."
     )
 
 
@@ -982,18 +962,6 @@ def parse_args() -> argparse.Namespace:
         choices=["us", "metric"],
         default=None,
         help="Units preset for dashboard metrics.",
-    )
-    parser.add_argument(
-        "--distance-unit",
-        choices=["mi", "km"],
-        default=None,
-        help="Distance unit override.",
-    )
-    parser.add_argument(
-        "--elevation-unit",
-        choices=["ft", "m"],
-        default=None,
-        help="Elevation unit override.",
     )
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Local callback port.")
     parser.add_argument(

@@ -32,13 +32,13 @@ Fastest path: fork, run one script, and let it configure the repository for you.
 4. Run setup:
 
    ```bash
-   python scripts/setup_auth.py
+   python3 scripts/setup_auth.py
    ```
 
    Follow the terminal prompts and choose a source:
       - `strava` (OAuth flow with `STRAVA_CLIENT_ID` and `STRAVA_CLIENT_SECRET`)
       - `garmin` (prompts for Garmin email/password, generates `GARMIN_TOKENS_B64`, and stores `GARMIN_TOKENS_B64` + Garmin email/password secrets for fallback auth)
-      - unit preference (`US`, `Metric`, or `Custom`)
+      - unit preference (`US` or `Metric`)
 
    If you choose `strava`, create a [Strava API application](https://www.strava.com/settings/api) first and set **Authorization Callback Domain** to `localhost`.
 
@@ -50,7 +50,7 @@ Fastest path: fork, run one script, and let it configure the repository for you.
 
 You can switch between `strava` and `garmin` any time, even after initial setup.
 
-- Re-run `python scripts/setup_auth.py` and choose a different source (or pass `--source strava` / `--source garmin`).
+- Re-run `python3 scripts/setup_auth.py` and choose a different source (or pass `--source strava` / `--source garmin`).
 - This updates `DASHBOARD_SOURCE`, so future scheduled runs use the new source until you change it again.
 - The first sync after a source change resets provider-specific state and rebuilds from the selected source.
 - Using the workflow **Run workflow** `source` input is a one-time override for that run only (it does not permanently change `DASHBOARD_SOURCE`).
