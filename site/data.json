@@ -8735,6 +8735,13 @@
       "subtype": "hiking",
       "type": "Hike",
       "year": 2026
+    },
+    {
+      "date": "2026-02-15",
+      "hour": 10,
+      "subtype": "strength_training",
+      "type": "WeightTraining",
+      "year": 2026
     }
   ],
   "aggregates": {
@@ -19935,6 +19942,15 @@
           "distance": 0.0,
           "elevation_gain": 0.0,
           "moving_time": 3756.60888671875
+        },
+        "2026-02-15": {
+          "activity_ids": [
+            "21877917311"
+          ],
+          "count": 1,
+          "distance": 0.0,
+          "elevation_gain": 0.0,
+          "moving_time": 3085.22509765625
         }
       },
       "Workout": {
@@ -19959,7 +19975,7 @@
       }
     }
   },
-  "generated_at": "2026-02-15T15:08:08.163323+00:00",
+  "generated_at": "2026-02-16T15:17:55.032103+00:00",
   "other_bucket": "OtherSports",
   "source": "garmin",
   "type_meta": {
