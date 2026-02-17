@@ -14986,5 +14986,17 @@
     "start_date_local": "2026-02-15T10:28:56",
     "type": "WeightTraining",
     "year": 2026
+  },
+  {
+    "date": "2026-02-17",
+    "distance": 3342.1201171875,
+    "elevation_gain": 97.0,
+    "id": "21895681819",
+    "moving_time": 2461.0,
+    "raw_activity_type": "hiking",
+    "raw_type": "hiking",
+    "start_date_local": "2026-02-17T07:21:01",
+    "type": "Hike",
+    "year": 2026
   }
 ]
