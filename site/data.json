@@ -8756,6 +8756,13 @@
       "subtype": "strength_training",
       "type": "WeightTraining",
       "year": 2026
+    },
+    {
+      "date": "2026-02-20",
+      "hour": 8,
+      "subtype": "indoor_cycling",
+      "type": "VirtualRide",
+      "year": 2026
     }
   ],
   "aggregates": {
@@ -19837,6 +19844,15 @@
           "distance": 16254.375,
           "elevation_gain": 0.0,
           "moving_time": 2084.343017578125
+        },
+        "2026-02-20": {
+          "activity_ids": [
+            "21927874873"
+          ],
+          "count": 1,
+          "distance": 24140.16015625,
+          "elevation_gain": 0.0,
+          "moving_time": 2993.7958984375
         }
       },
       "WeightTraining": {
@@ -20007,7 +20023,7 @@
       }
     }
   },
-  "generated_at": "2026-02-19T15:19:23.737824+00:00",
+  "generated_at": "2026-02-20T15:17:28.535845+00:00",
   "other_bucket": "OtherSports",
   "source": "garmin",
   "type_meta": {
